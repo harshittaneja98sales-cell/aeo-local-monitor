@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,8 +9,11 @@ const hostingSource = join(root, ".openai", "hosting.json");
 const hostingTarget = join(dist, ".openai", "hosting.json");
 
 mkdirSync(serverDir, { recursive: true });
-mkdirSync(dirname(hostingTarget), { recursive: true });
-copyFileSync(hostingSource, hostingTarget);
+
+if (existsSync(hostingSource)) {
+  mkdirSync(dirname(hostingTarget), { recursive: true });
+  copyFileSync(hostingSource, hostingTarget);
+}
 
 writeFileSync(
   join(serverDir, "index.js"),

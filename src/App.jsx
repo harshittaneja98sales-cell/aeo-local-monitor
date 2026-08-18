@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   ChevronRight,
   CircleGauge,
   Clock3,
+  ClipboardList,
   FileText,
   Globe2,
   ListChecks,
@@ -37,6 +38,7 @@ import {
 } from "./lib/scoring.js";
 
 const tabs = [
+  ["onboarding", "Onboarding", ClipboardList],
   ["overview", "Overview", CircleGauge],
   ["prompts", "Prompts", Search],
   ["listings", "Listings", MapPin],
@@ -52,14 +54,84 @@ const engineIcons = {
   apple: ShieldCheck,
 };
 
+const profileFields = [
+  ["name", "Business name"],
+  ["category", "Category"],
+  ["market", "Market"],
+  ["website", "Website"],
+  ["phone", "Phone"],
+  ["address", "Address"],
+  ["hours", "Hours"],
+  ["serviceArea", "Service area", "textarea"],
+  ["services", "Core services", "textarea"],
+  ["credential", "License / credential"],
+  ["bookingUrl", "Booking URL"],
+];
+
+const requiredProfileFields = profileFields.map(([key]) => key);
+
+function getInitialWorkspace() {
+  const fallbackType = "plumbing";
+  const saved = readStoredWorkspace();
+  const selectedBusinessType =
+    saved?.selectedBusinessType && businessTemplates[saved.selectedBusinessType]
+      ? saved.selectedBusinessType
+      : fallbackType;
+  const templateType =
+    businessTypes.find((type) => type.id === selectedBusinessType) ||
+    businessTypes[0];
+  const template = businessTemplates[selectedBusinessType];
+
+  return {
+    selectedBusinessType,
+    profile: { ...template.business, ...saved?.profile },
+    competitors: saved?.competitors || [
+      templateType.competitorA,
+      templateType.competitorB,
+    ],
+    monitoredLocations:
+      saved?.monitoredLocations ||
+      template.business.serviceArea
+        .split(",")
+        .map((location) => location.trim())
+        .filter(Boolean)
+        .slice(0, 4),
+  };
+}
+
+function readStoredWorkspace() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem("aeo-local-workspace");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function calculateSourceCompletion(profile, competitors, monitoredLocations) {
+  const completedProfileFields = requiredProfileFields.filter((key) =>
+    String(profile[key] || "").trim()
+  ).length;
+  const profileScore =
+    (completedProfileFields / requiredProfileFields.length) * 78;
+  const competitorScore = competitors.filter(Boolean).length >= 2 ? 12 : 0;
+  const locationScore = monitoredLocations.filter(Boolean).length >= 1 ? 10 : 0;
+
+  return Math.round(profileScore + competitorScore + locationScore);
+}
+
 function App() {
-  const [activeTab, setActiveTab] = useState("overview");
+  const [workspace, setWorkspace] = useState(getInitialWorkspace);
+  const [activeTab, setActiveTab] = useState("onboarding");
   const [scanState, setScanState] = useState("idle");
-  const [selectedBusinessType, setSelectedBusinessType] = useState("plumbing");
   const [selectedTask, setSelectedTask] = useState(
-    businessTemplates.plumbing.remediationTasks[0]
+    businessTemplates[workspace.selectedBusinessType].remediationTasks[0]
   );
-  const [profile, setProfile] = useState(businessTemplates.plumbing.business);
+  const selectedBusinessType = workspace.selectedBusinessType;
+  const profile = workspace.profile;
+  const competitors = workspace.competitors;
+  const monitoredLocations = workspace.monitoredLocations;
   const template = businessTemplates[selectedBusinessType];
   const graphSources = template.graphSources;
   const prompts = template.prompts;
@@ -69,11 +141,58 @@ function App() {
     [graphSources, remediationTasks]
   );
   const mentionCount = useMemo(() => countPromptMentions(prompts), [prompts]);
+  const sourceCompletion = useMemo(
+    () => calculateSourceCompletion(profile, competitors, monitoredLocations),
+    [profile, competitors, monitoredLocations]
+  );
+
+  useEffect(() => {
+    window.localStorage.setItem("aeo-local-workspace", JSON.stringify(workspace));
+  }, [workspace]);
+
+  function setProfile(nextProfile) {
+    setWorkspace((current) => ({
+      ...current,
+      profile:
+        typeof nextProfile === "function"
+          ? nextProfile(current.profile)
+          : nextProfile,
+    }));
+  }
+
+  function setCompetitors(nextCompetitors) {
+    setWorkspace((current) => ({
+      ...current,
+      competitors:
+        typeof nextCompetitors === "function"
+          ? nextCompetitors(current.competitors)
+          : nextCompetitors,
+    }));
+  }
+
+  function setMonitoredLocations(nextLocations) {
+    setWorkspace((current) => ({
+      ...current,
+      monitoredLocations:
+        typeof nextLocations === "function"
+          ? nextLocations(current.monitoredLocations)
+          : nextLocations,
+    }));
+  }
 
   function changeBusinessType(typeId) {
     const nextTemplate = businessTemplates[typeId];
-    setSelectedBusinessType(typeId);
-    setProfile(nextTemplate.business);
+    const nextType = businessTypes.find((type) => type.id === typeId);
+    setWorkspace({
+      selectedBusinessType: typeId,
+      profile: nextTemplate.business,
+      competitors: nextType ? [nextType.competitorA, nextType.competitorB] : [],
+      monitoredLocations: nextTemplate.business.serviceArea
+        .split(",")
+        .map((location) => location.trim())
+        .filter(Boolean)
+        .slice(0, 4),
+    });
     setSelectedTask(nextTemplate.remediationTasks[0]);
     setScanState("idle");
   }
@@ -166,9 +285,25 @@ function App() {
             score={score}
             mentionCount={mentionCount}
             scanState={scanState}
+            sourceCompletion={sourceCompletion}
             graphSources={graphSources}
             remediationTasks={remediationTasks}
             onSelectTask={setSelectedTask}
+          />
+        )}
+        {activeTab === "onboarding" && (
+          <Onboarding
+            profile={profile}
+            setProfile={setProfile}
+            businessTypes={businessTypes}
+            selectedBusinessType={selectedBusinessType}
+            onBusinessTypeChange={changeBusinessType}
+            competitors={competitors}
+            setCompetitors={setCompetitors}
+            monitoredLocations={monitoredLocations}
+            setMonitoredLocations={setMonitoredLocations}
+            sourceCompletion={sourceCompletion}
+            onFinish={() => setActiveTab("overview")}
           />
         )}
         {activeTab === "prompts" && <PromptMonitor prompts={prompts} />}
@@ -199,6 +334,7 @@ function Overview({
   score,
   mentionCount,
   scanState,
+  sourceCompletion,
   graphSources,
   remediationTasks,
   onSelectTask,
@@ -224,10 +360,7 @@ function Overview({
         <div className="metric-row">
           <Metric label="Prompt mentions" value={mentionCount} />
           <Metric label="Open fixes" value={remediationTasks.length} />
-          <Metric
-            label="Last run"
-            value={scanState === "complete" ? "Just now" : "Yesterday"}
-          />
+          <Metric label="Source truth" value={`${sourceCompletion}%`} />
         </div>
       </section>
 
@@ -278,6 +411,220 @@ function Overview({
         </div>
         <GraphSummary graphSources={graphSources} />
       </section>
+    </div>
+  );
+}
+
+function Onboarding({
+  profile,
+  setProfile,
+  businessTypes,
+  selectedBusinessType,
+  onBusinessTypeChange,
+  competitors,
+  setCompetitors,
+  monitoredLocations,
+  setMonitoredLocations,
+  sourceCompletion,
+  onFinish,
+}) {
+  const missingFields = requiredProfileFields.filter(
+    (key) => !String(profile[key] || "").trim()
+  );
+
+  function updateListValue(setter, index, value) {
+    setter((items) =>
+      items.map((item, itemIndex) => (itemIndex === index ? value : item))
+    );
+  }
+
+  function addListValue(setter) {
+    setter((items) => [...items, ""]);
+  }
+
+  function removeListValue(setter, index) {
+    setter((items) => items.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  return (
+    <div className="onboarding-grid">
+      <section className="panel onboarding-main">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Source of truth</p>
+            <h2>Business baseline</h2>
+          </div>
+          <span className="status-chip">{sourceCompletion}% complete</span>
+        </div>
+
+        <div className="progress-track">
+          <span style={{ width: `${sourceCompletion}%` }} />
+        </div>
+
+        <form className="profile-form onboarding-form">
+          <label>
+            <span>Business type</span>
+            <select
+              value={selectedBusinessType}
+              onChange={(event) => onBusinessTypeChange(event.target.value)}
+            >
+              {businessTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {profileFields.map(([key, label, fieldType]) => (
+            <label key={key}>
+              <span>{label}</span>
+              {fieldType === "textarea" ? (
+                <textarea
+                  value={profile[key] || ""}
+                  rows={3}
+                  onChange={(event) =>
+                    setProfile({ ...profile, [key]: event.target.value })
+                  }
+                />
+              ) : (
+                <input
+                  value={profile[key] || ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, [key]: event.target.value })
+                  }
+                />
+              )}
+            </label>
+          ))}
+        </form>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Market</p>
+            <h2>Competitors</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            title="Add competitor"
+            onClick={() => addListValue(setCompetitors)}
+          >
+            <Sparkles size={17} />
+          </button>
+        </div>
+        <div className="list-editor">
+          {competitors.map((competitor, index) => (
+            <div className="list-input-row" key={`competitor-${index}`}>
+              <input
+                value={competitor}
+                placeholder="Competitor business"
+                onChange={(event) =>
+                  updateListValue(setCompetitors, index, event.target.value)
+                }
+              />
+              <button
+                className="icon-button compact"
+                type="button"
+                title="Remove competitor"
+                onClick={() => removeListValue(setCompetitors, index)}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Coverage</p>
+            <h2>Tracked locations</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            title="Add location"
+            onClick={() => addListValue(setMonitoredLocations)}
+          >
+            <MapPin size={17} />
+          </button>
+        </div>
+        <div className="list-editor">
+          {monitoredLocations.map((location, index) => (
+            <div className="list-input-row" key={`location-${index}`}>
+              <input
+                value={location}
+                placeholder="City, neighborhood, or service area"
+                onChange={(event) =>
+                  updateListValue(
+                    setMonitoredLocations,
+                    index,
+                    event.target.value
+                  )
+                }
+              />
+              <button
+                className="icon-button compact"
+                type="button"
+                title="Remove location"
+                onClick={() => removeListValue(setMonitoredLocations, index)}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel onboarding-summary">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Launch</p>
+            <h2>Baseline status</h2>
+          </div>
+          <CheckCircle2 size={19} />
+        </div>
+        <div className="checklist">
+          <ChecklistRow
+            done={missingFields.length === 0}
+            label="Business profile fields"
+            detail={
+              missingFields.length === 0
+                ? "Ready"
+                : `${missingFields.length} missing`
+            }
+          />
+          <ChecklistRow
+            done={competitors.filter(Boolean).length >= 2}
+            label="Competitor set"
+            detail={`${competitors.filter(Boolean).length} added`}
+          />
+          <ChecklistRow
+            done={monitoredLocations.filter(Boolean).length >= 1}
+            label="Tracked locations"
+            detail={`${monitoredLocations.filter(Boolean).length} added`}
+          />
+        </div>
+        <button className="primary-button drawer-button" onClick={onFinish}>
+          <ArrowUpRight size={17} />
+          <span>Save baseline</span>
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function ChecklistRow({ done, label, detail }) {
+  return (
+    <div className="checklist-row">
+      <span className={done ? "check-dot done" : "check-dot"} />
+      <div>
+        <strong>{label}</strong>
+        <span>{detail}</span>
+      </div>
     </div>
   );
 }
@@ -502,26 +849,25 @@ function SettingsPanel({
               ))}
             </select>
           </label>
-          {[
-            ["name", "Business name"],
-            ["category", "Category"],
-            ["market", "Market"],
-            ["website", "Website"],
-            ["phone", "Phone"],
-            ["address", "Address"],
-            ["serviceArea", "Service area"],
-            ["services", "Core services"],
-            ["credential", "License / credential"],
-            ["bookingUrl", "Booking URL"],
-          ].map(([key, label]) => (
+          {profileFields.map(([key, label, fieldType]) => (
             <label key={key}>
               <span>{label}</span>
-              <input
-                value={profile[key]}
-                onChange={(event) =>
-                  setProfile({ ...profile, [key]: event.target.value })
-                }
-              />
+              {fieldType === "textarea" ? (
+                <textarea
+                  value={profile[key] || ""}
+                  rows={3}
+                  onChange={(event) =>
+                    setProfile({ ...profile, [key]: event.target.value })
+                  }
+                />
+              ) : (
+                <input
+                  value={profile[key] || ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, [key]: event.target.value })
+                  }
+                />
+              )}
             </label>
           ))}
         </form>

@@ -29,8 +29,13 @@ body {
 
 button,
 input,
+textarea,
 select {
   font: inherit;
+}
+
+textarea {
+  resize: vertical;
 }
 
 button {
@@ -267,6 +272,31 @@ button {
   grid-template-columns: minmax(280px, 0.9fr) minmax(420px, 1.4fr);
   gap: 16px;
   align-items: start;
+}
+
+.onboarding-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.5fr) minmax(280px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.onboarding-main {
+  grid-row: span 3;
+}
+
+.progress-track {
+  height: 10px;
+  background: #edf1f5;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #0f766e, #2563eb);
 }
 
 .panel {
@@ -635,7 +665,9 @@ th {
 
 .queue-list,
 .connector-list,
-.profile-form {
+.profile-form,
+.list-editor,
+.checklist {
   display: grid;
   gap: 10px;
 }
@@ -672,11 +704,78 @@ th {
 }
 
 .profile-form input,
-.profile-form select {
+.profile-form textarea,
+.profile-form select,
+.list-input-row input {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 11px;
   min-width: 0;
+  background: #ffffff;
+  color: var(--text);
+}
+
+.onboarding-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.onboarding-form label:nth-last-child(-n + 2) {
+  grid-column: span 2;
+}
+
+.list-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+
+.icon-button.compact {
+  width: 36px;
+  min-height: 36px;
+}
+
+.onboarding-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.checklist-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-top: 1px solid #edf1f5;
+  padding-top: 10px;
+}
+
+.checklist-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.checklist-row strong,
+.checklist-row span {
+  display: block;
+}
+
+.checklist-row span {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.check-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  margin-top: 5px;
+  flex: 0 0 auto;
+}
+
+.check-dot.done {
+  background: var(--green);
 }
 
 .connector-row {
@@ -813,9 +912,14 @@ dd {
   }
 
   .dashboard-grid,
+  .onboarding-grid,
   .audit-grid,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .onboarding-main {
+    grid-row: auto;
   }
 }
 
@@ -850,7 +954,12 @@ dd {
   }
 
   .task-row,
-  .queue-item {
+  .queue-item,
+  .onboarding-form {
     grid-template-columns: 1fr;
+  }
+
+  .onboarding-form label:nth-last-child(-n + 2) {
+    grid-column: auto;
   }
 }
