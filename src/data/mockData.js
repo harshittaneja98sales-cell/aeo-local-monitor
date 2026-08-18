@@ -1,0 +1,455 @@
+const baseEngineNotes = {
+  chatgpt: "Often cites owned service pages, reviews, and listing-derived facts.",
+  perplexity: "High citation rate, but sensitive to thin or outdated service pages.",
+  gemini: "Answers lean on directories and review sites when owned content is weak.",
+  "google-ai": "Only triggers on a subset of local commercial queries.",
+  apple: "Tracked through Apple Maps, Siri-style prompts, and place-card health.",
+};
+
+export const businessTypes = [
+  {
+    id: "plumbing",
+    label: "Plumbing",
+    serviceNoun: "plumber",
+    categoryTerm: "emergency plumbing",
+    urgentNeed: "burst pipe",
+    highIntentService: "same day water heater repair",
+    competitorA: "Blue Star Plumbing",
+    competitorB: "Kinsey Plumbing",
+    profile: {
+      name: "RapidFlow Plumbing",
+      businessType: "Plumbing",
+      category: "Emergency plumbing and water heater repair",
+      market: "Austin, TX",
+      website: "rapidflowplumbing.example",
+      phone: "(512) 555-0194",
+      address: "2147 S Lamar Blvd, Austin, TX",
+      hours: "Mon-Sun 24 hours",
+      serviceArea: "Austin, South Austin, Zilker, Barton Hills, Bouldin Creek",
+      services:
+        "Emergency plumbing, drain cleaning, leak repair, water heater repair, sewer line inspection",
+      credential: "Texas RMP-43821",
+      bookingUrl: "https://rapidflowplumbing.example/book",
+    },
+  },
+  {
+    id: "hvac",
+    label: "HVAC",
+    serviceNoun: "HVAC company",
+    categoryTerm: "AC repair",
+    urgentNeed: "broken air conditioner",
+    highIntentService: "same day AC repair",
+    competitorA: "Lone Star Air",
+    competitorB: "CoolBridge HVAC",
+    profile: {
+      name: "ClearSky Heating & Air",
+      businessType: "HVAC",
+      category: "AC repair, heating repair, and HVAC maintenance",
+      market: "Phoenix, AZ",
+      website: "clearskyhvac.example",
+      phone: "(602) 555-0162",
+      address: "834 E Camelback Rd, Phoenix, AZ",
+      hours: "Mon-Sun 7:00 AM-10:00 PM",
+      serviceArea: "Phoenix, Scottsdale, Tempe, Mesa, Glendale",
+      services:
+        "AC repair, heating repair, HVAC maintenance, duct repair, indoor air quality",
+      credential: "Arizona ROC-334890",
+      bookingUrl: "https://clearskyhvac.example/schedule",
+    },
+  },
+  {
+    id: "dentistry",
+    label: "Dentistry",
+    serviceNoun: "dentist",
+    categoryTerm: "emergency dental care",
+    urgentNeed: "tooth pain",
+    highIntentService: "same day dental appointment",
+    competitorA: "Pearl Street Dental",
+    competitorB: "Lakeside Dental",
+    profile: {
+      name: "Northstar Dental Studio",
+      businessType: "Dentistry",
+      category: "Family, cosmetic, and emergency dentist",
+      market: "Denver, CO",
+      website: "northstardental.example",
+      phone: "(303) 555-0128",
+      address: "1520 Market St, Denver, CO",
+      hours: "Mon-Fri 8:00 AM-6:00 PM, Sat 9:00 AM-2:00 PM",
+      serviceArea: "Denver, LoDo, Capitol Hill, Five Points, Highland",
+      services:
+        "Emergency dentistry, dental cleaning, crowns, implants, cosmetic dentistry",
+      credential: "Colorado Dental License DEN-74218",
+      bookingUrl: "https://northstardental.example/appointments",
+    },
+  },
+  {
+    id: "restaurant",
+    label: "Restaurant",
+    serviceNoun: "restaurant",
+    categoryTerm: "Italian restaurant",
+    urgentNeed: "dinner reservation",
+    highIntentService: "private dining",
+    competitorA: "Canto Osteria",
+    competitorB: "Bella Table",
+    profile: {
+      name: "Marinella Kitchen",
+      businessType: "Restaurant",
+      category: "Italian restaurant and private dining",
+      market: "Chicago, IL",
+      website: "marinellakitchen.example",
+      phone: "(312) 555-0147",
+      address: "905 W Randolph St, Chicago, IL",
+      hours: "Tue-Sun 4:00 PM-10:00 PM",
+      serviceArea: "West Loop, Fulton Market, River North, Near West Side",
+      services:
+        "Dinner, reservations, private dining, catering, wine pairings, takeout",
+      credential: "Chicago Food License FSE-20418",
+      bookingUrl: "https://marinellakitchen.example/reserve",
+    },
+  },
+  {
+    id: "salon",
+    label: "Salon",
+    serviceNoun: "hair salon",
+    categoryTerm: "color correction salon",
+    urgentNeed: "same week haircut",
+    highIntentService: "balayage color appointment",
+    competitorA: "Blush & Blade",
+    competitorB: "Studio Aria",
+    profile: {
+      name: "Luma Hair Studio",
+      businessType: "Salon",
+      category: "Hair salon, balayage, and color correction",
+      market: "Nashville, TN",
+      website: "lumahairstudio.example",
+      phone: "(615) 555-0119",
+      address: "410 12th Ave S, Nashville, TN",
+      hours: "Tue-Sat 9:00 AM-7:00 PM",
+      serviceArea: "Nashville, The Gulch, Music Row, Edgehill, 12 South",
+      services:
+        "Haircuts, balayage, color correction, blowouts, bridal styling, extensions",
+      credential: "Tennessee Cosmetology License COS-59013",
+      bookingUrl: "https://lumahairstudio.example/book",
+    },
+  },
+  {
+    id: "law",
+    label: "Law Firm",
+    serviceNoun: "personal injury lawyer",
+    categoryTerm: "personal injury law firm",
+    urgentNeed: "car accident consultation",
+    highIntentService: "free injury case review",
+    competitorA: "Summit Injury Law",
+    competitorB: "Cedar Legal Group",
+    profile: {
+      name: "Harbor & Finch Law",
+      businessType: "Law Firm",
+      category: "Personal injury and car accident law firm",
+      market: "Tampa, FL",
+      website: "harborfinchlaw.example",
+      phone: "(813) 555-0176",
+      address: "701 N Franklin St, Tampa, FL",
+      hours: "Mon-Fri 8:30 AM-6:00 PM",
+      serviceArea: "Tampa, St. Petersburg, Clearwater, Brandon, Riverview",
+      services:
+        "Car accidents, personal injury, slip and fall, wrongful death, free consultation",
+      credential: "Florida Bar #104893",
+      bookingUrl: "https://harborfinchlaw.example/free-consultation",
+    },
+  },
+];
+
+export const engines = [
+  {
+    id: "chatgpt",
+    name: "ChatGPT",
+    kind: "Answer engine",
+    visibility: 76,
+    mentions: 18,
+    citations: 11,
+    sentiment: "Strong",
+    status: "Ready",
+    trend: "+8%",
+    accent: "#2563eb",
+    note: baseEngineNotes.chatgpt,
+  },
+  {
+    id: "perplexity",
+    name: "Perplexity",
+    kind: "Answer engine",
+    visibility: 68,
+    mentions: 14,
+    citations: 16,
+    sentiment: "Good",
+    status: "Ready",
+    trend: "+4%",
+    accent: "#0f766e",
+    note: baseEngineNotes.perplexity,
+  },
+  {
+    id: "gemini",
+    name: "Gemini",
+    kind: "Answer engine",
+    visibility: 59,
+    mentions: 11,
+    citations: 8,
+    sentiment: "Mixed",
+    status: "Ready",
+    trend: "-2%",
+    accent: "#7c3aed",
+    note: baseEngineNotes.gemini,
+  },
+  {
+    id: "google-ai",
+    name: "Google AI Overviews",
+    kind: "SERP AI",
+    visibility: 42,
+    mentions: 7,
+    citations: 5,
+    sentiment: "Weak",
+    status: "Sampled",
+    trend: "+1%",
+    accent: "#b45309",
+    note: baseEngineNotes["google-ai"],
+  },
+  {
+    id: "apple",
+    name: "Apple Intelligence",
+    kind: "Apple ecosystem",
+    visibility: 38,
+    mentions: 6,
+    citations: 3,
+    sentiment: "Limited",
+    status: "Proxy",
+    trend: "0%",
+    accent: "#be123c",
+    note: baseEngineNotes.apple,
+  },
+];
+
+function buildGraphSources(type) {
+  return [
+    {
+      id: "gbp",
+      name: "Google Business Profile",
+      status: "Connected",
+      completeness: 88,
+      lastSync: "12 min ago",
+      issues: [
+        `${type.highIntentService} missing from service list`,
+        "Credential or license missing from website schema",
+      ],
+      fields: [
+        ["Name", "Matched"],
+        ["Address", "Matched"],
+        ["Phone", "Matched"],
+        ["Hours", "Matched"],
+        ["Primary category", "Matched"],
+        ["Services", "Needs update"],
+      ],
+    },
+    {
+      id: "apple-maps",
+      name: "Apple Maps",
+      status: "Needs review",
+      completeness: 74,
+      lastSync: "2 hr ago",
+      issues: [
+        "Cover photo missing",
+        `Place card does not clearly mention ${type.categoryTerm}`,
+        "Primary action is not configured",
+      ],
+      fields: [
+        ["Name", "Matched"],
+        ["Address", "Matched"],
+        ["Phone", "Matched"],
+        ["Hours", "Matched"],
+        ["Photos", "Missing"],
+        ["Actions", "Needs update"],
+      ],
+    },
+    {
+      id: "azure-maps",
+      name: "Bing / Azure Maps",
+      status: "Watch",
+      completeness: 69,
+      lastSync: "1 day ago",
+      issues: [
+        "Possible duplicate listing found nearby",
+        `Category is too broad for ${type.categoryTerm}`,
+      ],
+      fields: [
+        ["Name", "Matched"],
+        ["Address", "Possible duplicate"],
+        ["Phone", "Matched"],
+        ["Hours", "Matched"],
+        ["Category", "Needs update"],
+        ["Website", "Matched"],
+      ],
+    },
+  ];
+}
+
+function buildPrompts(type) {
+  const city = type.profile.market.split(",")[0];
+
+  return [
+    {
+      id: 1,
+      intent: "Discovery",
+      prompt: `best ${type.serviceNoun} near me in ${city}`,
+      volume: "High",
+      businessRank: 3,
+      competitors: [type.competitorA, type.competitorB],
+      engines: {
+        chatgpt: "Mentioned",
+        perplexity: "Mentioned",
+        gemini: "Not mentioned",
+        "google-ai": "Not triggered",
+        apple: "Proxy weak",
+      },
+      issue: `Core ${type.categoryTerm} page lacks clear proof, local relevance, and FAQ schema.`,
+    },
+    {
+      id: 2,
+      intent: "Comparison",
+      prompt: `${type.profile.name} vs ${type.competitorA} reviews`,
+      volume: "Medium",
+      businessRank: 1,
+      competitors: [type.competitorA],
+      engines: {
+        chatgpt: "Mentioned",
+        perplexity: "Mentioned",
+        gemini: "Mentioned",
+        "google-ai": "Mentioned",
+        apple: "Proxy ok",
+      },
+      issue: "Gemini repeats an outdated rating from a local directory.",
+    },
+    {
+      id: 3,
+      intent: "Service",
+      prompt: `who offers ${type.highIntentService} in ${city}`,
+      volume: "Medium",
+      businessRank: 5,
+      competitors: [type.competitorB, type.competitorA],
+      engines: {
+        chatgpt: "Mentioned",
+        perplexity: "Not mentioned",
+        gemini: "Not mentioned",
+        "google-ai": "Mentioned",
+        apple: "Proxy weak",
+      },
+      issue: `Owned content does not clearly state ${type.highIntentService} availability.`,
+    },
+    {
+      id: 4,
+      intent: "Fact check",
+      prompt: `is ${type.profile.name} available for ${type.urgentNeed}`,
+      volume: "Low",
+      businessRank: 1,
+      competitors: [],
+      engines: {
+        chatgpt: "Correct",
+        perplexity: "Correct",
+        gemini: "Incorrect",
+        "google-ai": "Correct",
+        apple: "Correct",
+      },
+      issue: "Availability language is inconsistent between homepage, service pages, and listings.",
+    },
+  ];
+}
+
+function buildRemediationTasks(type) {
+  return [
+    {
+      id: "r1",
+      severity: "High",
+      title: `Clarify ${type.highIntentService} availability`,
+      source: "Website, Gemini",
+      impact: "+9 visibility points",
+      effort: "15 min",
+      state: "Ready",
+      details:
+        "Update homepage, service pages, and schema markup so availability is consistent everywhere.",
+      actions: [
+        "Patch LocalBusiness openingHoursSpecification",
+        "Update homepage and service page availability copy",
+        "Submit recrawl request after deploy",
+      ],
+    },
+    {
+      id: "r2",
+      severity: "High",
+      title: `Add ${type.categoryTerm} service entity`,
+      source: "GBP, ChatGPT, Perplexity",
+      impact: "+12 visibility points",
+      effort: "45 min",
+      state: "Draft",
+      details: `Create a stronger ${type.categoryTerm} page and add matching service labels to Google Business Profile.`,
+      actions: [
+        `Add ${type.categoryTerm} service page section`,
+        `Write FAQ answers around ${type.urgentNeed}, pricing, timing, and service area`,
+        "Update GBP service list after approval",
+      ],
+    },
+    {
+      id: "r3",
+      severity: "Medium",
+      title: "Resolve duplicate listing risk",
+      source: "Azure Maps",
+      impact: "+5 visibility points",
+      effort: "30 min",
+      state: "Needs access",
+      details:
+        "The visible Bing/Azure result may point to an older place record. Confirm business ID and request merge if needed.",
+      actions: [
+        "Compare visible result against verified listing",
+        "Capture screenshots and listing IDs",
+        "Submit duplicate merge through Bing Places support",
+      ],
+    },
+    {
+      id: "r4",
+      severity: "Medium",
+      title: "Strengthen Apple place card",
+      source: "Apple Maps",
+      impact: "+6 visibility points",
+      effort: "25 min",
+      state: "Draft",
+      details:
+        "Add current photos, primary action, and category-specific attributes for Apple Maps/Siri-style discovery.",
+      actions: [
+        "Upload cover photo",
+        "Configure primary customer action",
+        "Add service, credential, and service-area attributes",
+      ],
+    },
+  ];
+}
+
+export const businessTemplates = businessTypes.reduce((templates, type) => {
+  templates[type.id] = {
+    business: type.profile,
+    graphSources: buildGraphSources(type),
+    prompts: buildPrompts(type),
+    remediationTasks: buildRemediationTasks(type),
+  };
+  return templates;
+}, {});
+
+export const business = businessTemplates.plumbing.business;
+export const graphSources = businessTemplates.plumbing.graphSources;
+export const prompts = businessTemplates.plumbing.prompts;
+export const remediationTasks = businessTemplates.plumbing.remediationTasks;
+
+export const connectors = [
+  ["OpenAI", "Ready", "Prompt monitoring"],
+  ["Perplexity", "Ready", "Prompt monitoring"],
+  ["Gemini", "Ready", "Search-grounded monitoring"],
+  ["Google Business Profile", "OAuth needed", "Listing remediation"],
+  ["Google Places", "Key needed", "Listing audit"],
+  ["Apple Business", "Partner review", "Listing remediation"],
+  ["Azure Maps", "Key needed", "Bing/POI audit"],
+];
