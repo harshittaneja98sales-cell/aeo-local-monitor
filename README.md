@@ -5,6 +5,7 @@ A lightweight SaaS prototype for tracking how local businesses appear across AI 
 ## Current MVP
 
 - Dashboard with AI visibility score, engine coverage, local listing health, prompt monitoring, and remediation queue.
+- Automated AI Search Audit screen with hyper-local prompt simulation, AI Share of Voice, citation detection, competitor recommendations, and entity-gap findings.
 - Mocked provider data for ChatGPT, Perplexity, Gemini, Google AI Overviews, Apple Intelligence, Google Business Profile, Apple Maps, and Microsoft/Azure Maps.
 - API key placeholders in `.env.example` for the real integrations.
 

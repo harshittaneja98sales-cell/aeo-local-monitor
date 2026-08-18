@@ -274,6 +274,234 @@ button {
   align-items: start;
 }
 
+.audit-workspace {
+  display: grid;
+  gap: 16px;
+}
+
+.audit-control {
+  display: grid;
+  gap: 10px;
+}
+
+.audit-setup {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.wide-control select {
+  width: 100%;
+}
+
+.audit-target {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.audit-target div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.audit-target span,
+.audit-target strong {
+  display: block;
+}
+
+.audit-target span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.audit-target strong {
+  overflow-wrap: anywhere;
+  margin-top: 3px;
+}
+
+.audit-run-button {
+  min-width: 184px;
+}
+
+.audit-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.audit-metric-card {
+  box-shadow: none;
+}
+
+.audit-metric-card span,
+.audit-metric-card strong,
+.audit-metric-card small {
+  display: block;
+}
+
+.audit-metric-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.audit-metric-card strong {
+  font-size: 28px;
+  margin-top: 7px;
+}
+
+.audit-metric-card small {
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+.prompt-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.prompt-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.prompt-card-head,
+.audit-result-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.prompt-card strong {
+  line-height: 1.35;
+}
+
+.engine-result-strip {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.result-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  min-height: 24px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.result-chip.cited {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.result-chip.mentioned {
+  color: #075985;
+  background: #e0f2fe;
+}
+
+.result-chip.missed {
+  color: #9f1239;
+  background: #ffe4e6;
+}
+
+.audit-split {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.2fr) minmax(320px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.audit-result-list,
+.gap-list {
+  display: grid;
+  gap: 10px;
+}
+
+.audit-result-row,
+.gap-card,
+.competitor-share-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.audit-result-row p,
+.gap-card p {
+  color: #475569;
+  margin: 8px 0;
+  line-height: 1.45;
+}
+
+.audit-result-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.audit-result-meta span {
+  border: 1px solid #edf1f5;
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.gap-card {
+  display: grid;
+  gap: 7px;
+}
+
+.gap-card > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gap-card small {
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.competitor-share-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.competitor-share-card {
+  display: grid;
+  gap: 5px;
+}
+
+.competitor-share-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.competitor-share-card small {
+  color: var(--muted);
+}
+
 .onboarding-grid {
   display: grid;
   grid-template-columns: minmax(420px, 1.5fr) minmax(280px, 0.85fr);
@@ -515,6 +743,11 @@ button {
 .severity.medium {
   color: #92400e;
   background: #fef3c7;
+}
+
+.severity.low {
+  color: #075985;
+  background: #e0f2fe;
 }
 
 .task-stack {
@@ -896,7 +1129,7 @@ dd {
   }
 
   .nav-list {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .nav-item {
@@ -912,6 +1145,7 @@ dd {
   }
 
   .dashboard-grid,
+  .audit-split,
   .onboarding-grid,
   .audit-grid,
   .settings-grid {
@@ -944,8 +1178,16 @@ dd {
   }
 
   .metric-row,
+  .audit-metrics,
   .graph-grid,
-  .detail-grid {
+  .detail-grid,
+  .prompt-card-grid,
+  .competitor-share-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-setup,
+  .audit-target {
     grid-template-columns: 1fr;
   }
 

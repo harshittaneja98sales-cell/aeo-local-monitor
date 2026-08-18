@@ -36,8 +36,10 @@ import {
   countPromptMentions,
   getStatusTone,
 } from "./lib/scoring.js";
+import { runLocalAiAudit } from "./lib/auditSimulation.js";
 
 const tabs = [
+  ["audit", "AI Audit", Bot],
   ["onboarding", "Onboarding", ClipboardList],
   ["overview", "Overview", CircleGauge],
   ["prompts", "Prompts", Search],
@@ -123,8 +125,9 @@ function calculateSourceCompletion(profile, competitors, monitoredLocations) {
 
 function App() {
   const [workspace, setWorkspace] = useState(getInitialWorkspace);
-  const [activeTab, setActiveTab] = useState("onboarding");
+  const [activeTab, setActiveTab] = useState("audit");
   const [scanState, setScanState] = useState("idle");
+  const [auditState, setAuditState] = useState("ready");
   const [selectedTask, setSelectedTask] = useState(
     businessTemplates[workspace.selectedBusinessType].remediationTasks[0]
   );
@@ -144,6 +147,25 @@ function App() {
   const sourceCompletion = useMemo(
     () => calculateSourceCompletion(profile, competitors, monitoredLocations),
     [profile, competitors, monitoredLocations]
+  );
+  const auditReport = useMemo(
+    () =>
+      runLocalAiAudit({
+        profile,
+        businessType: businessTypes.find(
+          (type) => type.id === selectedBusinessType
+        ),
+        competitors,
+        monitoredLocations,
+        sourceCompletion,
+      }),
+    [
+      profile,
+      selectedBusinessType,
+      competitors,
+      monitoredLocations,
+      sourceCompletion,
+    ]
   );
 
   useEffect(() => {
@@ -195,12 +217,19 @@ function App() {
     });
     setSelectedTask(nextTemplate.remediationTasks[0]);
     setScanState("idle");
+    setAuditState("ready");
   }
 
   function runScan() {
     if (scanState === "running") return;
     setScanState("running");
     window.setTimeout(() => setScanState("complete"), 1400);
+  }
+
+  function runAudit() {
+    if (auditState === "running") return;
+    setAuditState("running");
+    window.setTimeout(() => setAuditState("complete"), 1200);
   }
 
   return (
@@ -289,6 +318,18 @@ function App() {
             graphSources={graphSources}
             remediationTasks={remediationTasks}
             onSelectTask={setSelectedTask}
+          />
+        )}
+        {activeTab === "audit" && (
+          <AiAudit
+            profile={profile}
+            selectedBusinessType={selectedBusinessType}
+            businessTypes={businessTypes}
+            onBusinessTypeChange={changeBusinessType}
+            auditReport={auditReport}
+            auditState={auditState}
+            sourceCompletion={sourceCompletion}
+            onRunAudit={runAudit}
           />
         )}
         {activeTab === "onboarding" && (
@@ -412,6 +453,233 @@ function Overview({
         <GraphSummary graphSources={graphSources} />
       </section>
     </div>
+  );
+}
+
+function AiAudit({
+  profile,
+  selectedBusinessType,
+  businessTypes,
+  onBusinessTypeChange,
+  auditReport,
+  auditState,
+  sourceCompletion,
+  onRunAudit,
+}) {
+  const { summary, prompts, results, entityGaps, competitorShare } = auditReport;
+  const visibleResults = results.slice(0, 12);
+  const completed = auditState === "complete";
+  const running = auditState === "running";
+
+  return (
+    <div className="audit-workspace">
+      <section className="panel audit-control">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Feature 1</p>
+            <h2>Automated AI Search Audit</h2>
+          </div>
+          <span className="status-chip">
+            {running ? "Running" : completed ? "Complete" : "Ready"}
+          </span>
+        </div>
+
+        <div className="audit-setup">
+          <label className="type-select wide-control">
+            <span>Business type</span>
+            <select
+              value={selectedBusinessType}
+              onChange={(event) => onBusinessTypeChange(event.target.value)}
+            >
+              {businessTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="audit-target">
+            <div>
+              <span>Business</span>
+              <strong>{profile.name}</strong>
+            </div>
+            <div>
+              <span>Address or URL</span>
+              <strong>{profile.address || profile.website}</strong>
+            </div>
+            <div>
+              <span>Market</span>
+              <strong>{profile.market}</strong>
+            </div>
+          </div>
+
+          <button className="primary-button audit-run-button" onClick={onRunAudit}>
+            {running ? <RefreshCw className="spin" size={17} /> : <Search size={17} />}
+            <span>{running ? "Simulating queries" : "Run AI search audit"}</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="audit-metrics">
+        <AuditMetric
+          label="AI Share of Voice"
+          value={`${summary.shareOfVoice}%`}
+          detail={`${summary.mentions}/${summary.total} engine answers mention the business`}
+        />
+        <AuditMetric
+          label="Mention Score"
+          value={summary.mentionScore}
+          detail={`Average rank ${summary.averageRank}`}
+        />
+        <AuditMetric
+          label="Direct Citations"
+          value={`${summary.citationRate}%`}
+          detail={`${summary.citations} answers cite a source`}
+        />
+        <AuditMetric
+          label="Entity Baseline"
+          value={`${sourceCompletion}%`}
+          detail={`${entityGaps.length} structured-data gaps detected`}
+        />
+      </section>
+
+      <section className="panel wide">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Hyper-local prompts</p>
+            <h2>Prompt simulation matrix</h2>
+          </div>
+          <span className="quiet-status">{prompts.length} prompts x 4 engines</span>
+        </div>
+        <div className="prompt-card-grid">
+          {prompts.map((prompt) => (
+            <article className="prompt-card" key={prompt.id}>
+              <div className="prompt-card-head">
+                <span className="intent-chip">{prompt.intent}</span>
+                <span className="quiet-status">{prompt.priority}</span>
+              </div>
+              <strong>{prompt.query}</strong>
+              <div className="engine-result-strip">
+                {results
+                  .filter((result) => result.promptId === prompt.id)
+                  .map((result) => (
+                    <span
+                      className={
+                        result.mentioned
+                          ? result.cited
+                            ? "result-chip cited"
+                            : "result-chip mentioned"
+                          : "result-chip missed"
+                      }
+                      key={result.id}
+                    >
+                      {result.engine.replace("Google AI Overviews", "Google AI")}
+                    </span>
+                  ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="audit-split">
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Parsed answer output</p>
+              <h2>Mention, citation, and competitor detection</h2>
+            </div>
+            <FileText size={19} />
+          </div>
+          <div className="audit-result-list">
+            {visibleResults.map((result) => (
+              <article className="audit-result-row" key={result.id}>
+                <div className="audit-result-top">
+                  <strong>{result.engine}</strong>
+                  <span
+                    className={
+                      result.mentioned
+                        ? result.cited
+                          ? "result-chip cited"
+                          : "result-chip mentioned"
+                        : "result-chip missed"
+                    }
+                  >
+                    {result.mentioned
+                      ? result.cited
+                        ? "Mentioned + cited"
+                        : "Mentioned"
+                      : "Skipped"}
+                  </span>
+                </div>
+                <p>{result.finding}</p>
+                <div className="audit-result-meta">
+                  <span>Rank: {result.rank ? `#${result.rank}` : "N/A"}</span>
+                  <span>Source: {result.source || "No direct source"}</span>
+                  <span>
+                    Competitors: {result.competitorRecommendations.join(", ")}
+                  </span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Entity gap</p>
+              <h2>Why AI may skip this business</h2>
+            </div>
+            <AlertTriangle size={19} />
+          </div>
+          <div className="gap-list">
+            {entityGaps.map((gap) => (
+              <article className="gap-card" key={gap.id}>
+                <div>
+                  <span className={`severity ${gap.severity.toLowerCase()}`}>
+                    {gap.severity}
+                  </span>
+                  <strong>{gap.title}</strong>
+                </div>
+                <p>{gap.detail}</p>
+                <small>{gap.fix}</small>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Competitor pressure</p>
+            <h2>Top recommended alternatives</h2>
+          </div>
+          <ListChecks size={19} />
+        </div>
+        <div className="competitor-share-grid">
+          {competitorShare.map((competitor, index) => (
+            <article className="competitor-share-card" key={competitor.name}>
+              <span>#{index + 1}</span>
+              <strong>{competitor.name}</strong>
+              <small>{competitor.count} AI recommendations</small>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AuditMetric({ label, value, detail }) {
+  return (
+    <article className="panel audit-metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </article>
   );
 }
 

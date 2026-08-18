@@ -1,0 +1,384 @@
+export const auditEngines = [
+  {
+    id: "chatgpt-search",
+    name: "ChatGPT with Search",
+    shortName: "ChatGPT",
+    citationBias: 8,
+    mentionBias: 9,
+  },
+  {
+    id: "perplexity",
+    name: "Perplexity",
+    shortName: "Perplexity",
+    citationBias: 14,
+    mentionBias: 4,
+  },
+  {
+    id: "gemini",
+    name: "Gemini",
+    shortName: "Gemini",
+    citationBias: 2,
+    mentionBias: -4,
+  },
+  {
+    id: "google-ai-overviews",
+    name: "Google AI Overviews",
+    shortName: "Google AI",
+    citationBias: -3,
+    mentionBias: -12,
+  },
+];
+
+export function runLocalAiAudit({
+  profile,
+  businessType,
+  competitors,
+  monitoredLocations,
+  sourceCompletion,
+}) {
+  const prompts = buildHyperLocalPrompts({
+    profile,
+    businessType,
+    monitoredLocations,
+  });
+  const entityGaps = detectEntityGaps(profile);
+  const normalizedCompetitors = normalizeCompetitors(
+    competitors,
+    businessType,
+    profile
+  );
+  const results = prompts.flatMap((prompt, promptIndex) =>
+    auditEngines.map((engine, engineIndex) =>
+      simulateEngineResult({
+        engine,
+        engineIndex,
+        prompt,
+        promptIndex,
+        profile,
+        businessType,
+        competitors: normalizedCompetitors,
+        sourceCompletion,
+        entityGaps,
+      })
+    )
+  );
+
+  return {
+    prompts,
+    entityGaps,
+    results,
+    summary: summarizeResults(results),
+    competitorShare: summarizeCompetitors(results),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export function buildHyperLocalPrompts({ profile, businessType, monitoredLocations }) {
+  const city = extractCity(profile.market);
+  const primaryLocation = monitoredLocations.find(Boolean) || city;
+  const secondaryLocation = monitoredLocations.filter(Boolean)[1] || city;
+  const service = firstService(profile.services) || businessType.highIntentService;
+
+  return [
+    {
+      id: "highest-rated",
+      intent: "Discovery",
+      priority: "High",
+      query: `Who is the highest-rated ${businessType.serviceNoun} in ${primaryLocation} that offers ${service}?`,
+    },
+    {
+      id: "open-now",
+      intent: "Urgent Need",
+      priority: "High",
+      query: `Best ${businessType.serviceNoun} near ${secondaryLocation} open now`,
+    },
+    {
+      id: "problem-solution",
+      intent: "Service",
+      priority: "High",
+      query: `Who should I call for ${businessType.urgentNeed} in ${city}?`,
+    },
+    {
+      id: "brand-check",
+      intent: "Fact Check",
+      priority: "Medium",
+      query: `Is ${profile.name} a good option for ${businessType.categoryTerm} in ${city}?`,
+    },
+    {
+      id: "competitor-list",
+      intent: "Comparison",
+      priority: "Medium",
+      query: `Top local businesses for ${businessType.highIntentService} near ${primaryLocation}`,
+    },
+    {
+      id: "fastest-response",
+      intent: "Decision",
+      priority: "Medium",
+      query: `Which ${businessType.serviceNoun} has the fastest response in ${city}?`,
+    },
+  ];
+}
+
+export function detectEntityGaps(profile) {
+  const gaps = [];
+  const services = splitCsv(profile.services);
+
+  if (!profile.website) {
+    gaps.push({
+      id: "website",
+      severity: "High",
+      title: "Website URL missing",
+      detail:
+        "AI answers need a crawlable owned source before the business can be cited directly.",
+      fix: "Add the canonical website URL and make sure key service pages are indexable.",
+    });
+  }
+
+  if (!profile.address) {
+    gaps.push({
+      id: "address",
+      severity: "High",
+      title: "Address missing",
+      detail:
+        "Local engines need a precise address or verified service-area signal to connect the entity to nearby prompts.",
+      fix: "Add the full address or verified service-area configuration.",
+    });
+  }
+
+  if (!profile.hours) {
+    gaps.push({
+      id: "hours",
+      severity: "High",
+      title: "Opening hours missing",
+      detail:
+        "Open-now and urgent-intent prompts are difficult to answer when openingHours data is absent.",
+      fix: "Add openingHoursSpecification to LocalBusiness JSON-LD and keep listings aligned.",
+    });
+  }
+
+  if (services.length < 4) {
+    gaps.push({
+      id: "services",
+      severity: "Medium",
+      title: "Service coverage is thin",
+      detail:
+        "The business may be skipped when AI engines cannot map specific user problems to explicit service pages.",
+      fix: "Add clear service entities, FAQs, and examples for the top commercial intents.",
+    });
+  }
+
+  if (!profile.credential) {
+    gaps.push({
+      id: "credential",
+      severity: "Medium",
+      title: "Credential signal missing",
+      detail:
+        "Licenses, professional identifiers, and trust markers help answer engines distinguish the business from generic directories.",
+      fix: "Add license, certification, or professional membership fields to the profile and website.",
+    });
+  }
+
+  gaps.push({
+    id: "geo",
+    severity: "Medium",
+    title: "Geo coordinates not verified",
+    detail:
+      "The audit has an address, but no verified latitude/longitude pair from Google, Apple, or Bing yet.",
+    fix: "Connect Google Places, Apple Maps, or Azure Maps to verify coordinates.",
+  });
+
+  gaps.push({
+    id: "qa",
+    severity: "Low",
+    title: "Direct Q&A blocks not detected",
+    detail:
+      "Conversational engines prefer concise answers to pricing, availability, timing, and service-area questions.",
+    fix: "Add FAQPage or Q&A sections for the highest-intent prompts.",
+  });
+
+  return gaps;
+}
+
+function simulateEngineResult({
+  engine,
+  engineIndex,
+  prompt,
+  promptIndex,
+  profile,
+  businessType,
+  competitors,
+  sourceCompletion,
+  entityGaps,
+}) {
+  const isBrandPrompt = prompt.query
+    .toLowerCase()
+    .includes(profile.name.toLowerCase());
+  const highSeverityGaps = entityGaps.filter((gap) => gap.severity === "High")
+    .length;
+  const promptPenalty = [0, -8, -5, 10, -11, -14][promptIndex] || 0;
+  const gapPenalty = highSeverityGaps * 9 + entityGaps.length * 2;
+  const signalScore =
+    sourceCompletion +
+    engine.mentionBias +
+    promptPenalty +
+    (isBrandPrompt ? 16 : 0) -
+    gapPenalty +
+    deterministicJitter(promptIndex, engineIndex);
+  const mentioned = signalScore >= 54;
+  const cited = mentioned && signalScore + engine.citationBias >= 68;
+  const rank = mentioned
+    ? Math.max(1, Math.min(5, 6 - Math.floor(signalScore / 18)))
+    : null;
+  const source = cited ? getBestSource(profile, promptIndex) : null;
+  const competitorRecommendations = getCompetitorRecommendations(
+    competitors,
+    promptIndex,
+    engineIndex,
+    mentioned
+  );
+
+  return {
+    id: `${prompt.id}-${engine.id}`,
+    promptId: prompt.id,
+    query: prompt.query,
+    intent: prompt.intent,
+    priority: prompt.priority,
+    engine: engine.name,
+    engineId: engine.id,
+    mentioned,
+    cited,
+    rank,
+    source,
+    competitorRecommendations,
+    confidence: Math.max(36, Math.min(94, signalScore)),
+    finding: buildFinding({
+      engine,
+      mentioned,
+      cited,
+      source,
+      profile,
+      businessType,
+      competitors: competitorRecommendations,
+    }),
+  };
+}
+
+function summarizeResults(results) {
+  const total = results.length;
+  const mentions = results.filter((result) => result.mentioned).length;
+  const citations = results.filter((result) => result.cited).length;
+  const rankedResults = results.filter((result) => result.rank);
+  const averageRank =
+    rankedResults.length === 0
+      ? null
+      : rankedResults.reduce((sum, result) => sum + result.rank, 0) /
+        rankedResults.length;
+  const rankScore = averageRank ? Math.max(0, 100 - (averageRank - 1) * 18) : 0;
+  const shareOfVoice = Math.round((mentions / total) * 100);
+  const citationRate = Math.round((citations / total) * 100);
+  const mentionScore = Math.round(
+    shareOfVoice * 0.62 + citationRate * 0.25 + rankScore * 0.13
+  );
+
+  return {
+    total,
+    mentions,
+    citations,
+    shareOfVoice,
+    citationRate,
+    mentionScore,
+    averageRank: averageRank ? averageRank.toFixed(1) : "N/A",
+  };
+}
+
+function summarizeCompetitors(results) {
+  const counts = results
+    .flatMap((result) => result.competitorRecommendations)
+    .reduce((summary, competitor) => {
+      summary[competitor] = (summary[competitor] || 0) + 1;
+      return summary;
+    }, {});
+
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, count]) => ({ name, count }));
+}
+
+function normalizeCompetitors(competitors, businessType, profile) {
+  const city = extractCity(profile.market);
+  const fallback = [
+    businessType.competitorA,
+    businessType.competitorB,
+    `${city} Local ${businessType.label}`,
+  ];
+  const unique = [...competitors, ...fallback]
+    .map((competitor) => String(competitor || "").trim())
+    .filter(Boolean)
+    .filter((competitor) => competitor !== profile.name);
+
+  return [...new Set(unique)].slice(0, 5);
+}
+
+function getCompetitorRecommendations(
+  competitors,
+  promptIndex,
+  engineIndex,
+  mentioned
+) {
+  const offset = (promptIndex + engineIndex) % competitors.length;
+  const ordered = [...competitors.slice(offset), ...competitors.slice(0, offset)];
+  return ordered.slice(0, mentioned ? 2 : 3);
+}
+
+function getBestSource(profile, promptIndex) {
+  const sources = [
+    profile.website,
+    "Google Business Profile",
+    `${profile.website}/services`,
+    "Local directory citation",
+  ];
+
+  return sources[promptIndex % sources.length];
+}
+
+function buildFinding({
+  engine,
+  mentioned,
+  cited,
+  source,
+  profile,
+  businessType,
+  competitors,
+}) {
+  if (mentioned && cited) {
+    return `${engine.shortName} recommends ${profile.name} and cites ${source}.`;
+  }
+
+  if (mentioned) {
+    return `${engine.shortName} mentions ${profile.name}, but does not cite a direct owned source.`;
+  }
+
+  return `${engine.shortName} recommends ${competitors
+    .slice(0, 2)
+    .join(" and ")} instead because ${businessType.categoryTerm} signals look stronger.`;
+}
+
+function deterministicJitter(promptIndex, engineIndex) {
+  return ((promptIndex + 1) * 7 + (engineIndex + 2) * 11) % 13;
+}
+
+function firstService(services) {
+  return splitCsv(services)[0];
+}
+
+function splitCsv(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function extractCity(market) {
+  return String(market || "your market").split(",")[0].trim();
+}
