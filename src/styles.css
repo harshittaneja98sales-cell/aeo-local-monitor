@@ -1338,6 +1338,19 @@ button {
   width: auto;
 }
 
+.audit-run-button svg,
+.audit-run-button span {
+  color: #ffffff;
+  opacity: 1;
+}
+
+.audit-run-button span {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .audit-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
