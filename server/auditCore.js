@@ -15,12 +15,13 @@ export async function runServerAudit(payload = {}, env = process.env) {
   const request = normalizeAuditPayload(payload);
   const simulatedAudit = runLocalAiAudit(request);
   const websiteScan = await crawlWebsite(request.profile.website, request);
+  const openAiApiKey = getOpenAiApiKey(env);
   const entityGaps = mergeEntityGaps(
     simulatedAudit.entityGaps,
     buildWebsiteScanGaps(websiteScan)
   );
 
-  if (!env.OPENAI_API_KEY) {
+  if (!openAiApiKey) {
     return {
       ...simulatedAudit,
       mode: "server-crawler-simulation",
@@ -42,6 +43,7 @@ export async function runServerAudit(payload = {}, env = process.env) {
     simulatedResults: simulatedAudit.results,
     websiteScan,
     env,
+    openAiApiKey,
   });
   const results = simulatedAudit.results.map((result) => {
     if (result.engineId !== "chatgpt-search") return result;
@@ -346,8 +348,14 @@ function buildWebsiteScanGaps(scan) {
   return gaps;
 }
 
-async function runOpenAiSearchAudit({ request, simulatedResults, websiteScan, env }) {
-  const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+async function runOpenAiSearchAudit({
+  request,
+  simulatedResults,
+  websiteScan,
+  env,
+  openAiApiKey,
+}) {
+  const client = new OpenAI({ apiKey: openAiApiKey });
   const prompts = simulatedResults
     .filter((result) => result.engineId === "chatgpt-search")
     .map((result) => ({
@@ -603,6 +611,10 @@ function normalizeText(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function getOpenAiApiKey(env) {
+  return env.OPENAI_API_KEY || env.OPENAI_api_KEY || "";
 }
 
 export { auditEngines };
