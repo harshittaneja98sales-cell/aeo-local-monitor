@@ -219,6 +219,9 @@ function App() {
   const [answerHub, setAnswerHub] = useState(null);
   const [answerHubState, setAnswerHubState] = useState("ready");
   const [answerHubNotice, setAnswerHubNotice] = useState("");
+  const [placesSnapshot, setPlacesSnapshot] = useState(null);
+  const [placesState, setPlacesState] = useState("ready");
+  const [placesNotice, setPlacesNotice] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState({
     mode: "unknown",
     detail: "Run an audit to start building trend history.",
@@ -446,6 +449,9 @@ function App() {
     setAnswerHub(null);
     setAnswerHubState("ready");
     setAnswerHubNotice("");
+    setPlacesSnapshot(null);
+    setPlacesState("ready");
+    setPlacesNotice("");
     setAuditState((current) => (current === "running" ? current : "ready"));
   }
 
@@ -628,6 +634,67 @@ function App() {
     } finally {
       setAnswerHubState("ready");
     }
+  }
+
+  async function runGooglePlacesLookup() {
+    if (placesState === "running") return;
+    setPlacesState("running");
+    setPlacesNotice("Checking Google Places for the verified business profile.");
+
+    try {
+      const response = await fetch("/api/places", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(buildServerPayload()),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Google Places endpoint returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!data.googlePlaces) {
+        throw new Error("Google Places endpoint returned an empty payload");
+      }
+
+      setPlacesSnapshot(data.googlePlaces);
+      setPlacesNotice(getGooglePlacesNotice(data.googlePlaces));
+    } catch (error) {
+      setPlacesNotice(
+        error instanceof Error
+          ? error.message
+          : "Google Places lookup could not be completed."
+      );
+    } finally {
+      setPlacesState("ready");
+    }
+  }
+
+  function importGooglePlace(place = placesSnapshot?.target) {
+    if (!place) return;
+    const nextProfile = {
+      ...profile,
+      name: place.name || profile.name,
+      address: place.address || profile.address,
+      phone: place.phone || profile.phone,
+      website: place.website || profile.website,
+      hours: place.hours || profile.hours,
+      category: profile.category || place.primaryTypeLabel || profile.category,
+      googlePlaceId: place.id || profile.googlePlaceId,
+      googleMapsUrl: place.mapsUrl || profile.googleMapsUrl,
+      googleRating: place.rating ?? profile.googleRating,
+      googleReviewCount: place.userRatingCount ?? profile.googleReviewCount,
+      googleCategory: place.primaryTypeLabel || profile.googleCategory,
+    };
+
+    resetAuditResult();
+    setWorkspace((current) => ({
+      ...current,
+      profile: nextProfile,
+    }));
+    setPlacesNotice(
+      "Google place facts imported. Run the AI audit again with the verified profile."
+    );
   }
 
   async function saveAnswerHubChanges(nextHub = answerHub) {
@@ -952,6 +1019,11 @@ function App() {
             businessId={businessId}
             sourceCompletion={sourceCompletion}
             onRunAudit={runAudit}
+            placesSnapshot={placesSnapshot}
+            placesState={placesState}
+            placesNotice={placesNotice}
+            onRunPlacesLookup={runGooglePlacesLookup}
+            onImportGooglePlace={importGooglePlace}
           />
         )}
         {activeTab === "schema" && (
@@ -1601,6 +1673,68 @@ function getAuditErrorMessage(error) {
   return `Live audit endpoint failed: ${
     error instanceof Error ? error.message : "Unknown error"
   }.`;
+}
+
+function getGooglePlacesNotice(snapshot) {
+  if (!snapshot) return "";
+  if (snapshot.mode === "not_configured") {
+    return "Google Places is not connected yet. Add GOOGLE_MAPS_API_KEY in Vercel to enable verified place lookup.";
+  }
+  if (snapshot.mode === "error") {
+    return snapshot.providerStatus?.[0]?.detail || "Google Places lookup failed.";
+  }
+  if (snapshot.status === "matched") {
+    const fields = snapshot.summary?.matchedFields || 0;
+    const differences = snapshot.summary?.differentFields || 0;
+    return `Google Places matched this business with ${fields} verified field${fields === 1 ? "" : "s"} and ${differences} difference${differences === 1 ? "" : "s"}.`;
+  }
+  if (snapshot.status === "not_found") {
+    return "Google Places responded, but no confident business match was found.";
+  }
+  return "Google Places lookup completed.";
+}
+
+function getGooglePlacesStatusLabel(snapshot, state) {
+  if (state === "running") return "Searching";
+  if (!snapshot) return "Ready";
+  if (snapshot.mode === "not_configured") return "Not connected";
+  if (snapshot.mode === "error") return "Error";
+  if (snapshot.status === "matched") return "Matched";
+  if (snapshot.status === "not_found") return "No match";
+  return "Ready";
+}
+
+function getGooglePlacesStatusClass(snapshot, state) {
+  if (state === "running") return "places-running";
+  if (!snapshot) return "";
+  if (snapshot.mode === "not_configured") return "places-muted";
+  if (snapshot.mode === "error" || snapshot.status === "not_found") {
+    return "places-warning";
+  }
+  if (snapshot.status === "matched") return "places-good";
+  return "";
+}
+
+function getPlaceFieldStatusLabel(status) {
+  const labels = {
+    matched: "Matched",
+    available: "Available",
+    different: "Different",
+    "google-only": "Importable",
+    "profile-only": "Profile only",
+    missing: "Missing",
+  };
+  return labels[status] || "Review";
+}
+
+function getPlaceFieldStatusClass(status) {
+  return `place-field-status ${status || "review"}`;
+}
+
+function formatGoogleRating(place) {
+  if (!place?.rating) return "No rating";
+  const reviews = place.userRatingCount ? ` (${place.userRatingCount} reviews)` : "";
+  return `${place.rating}${reviews}`;
 }
 
 function getMonitorAlertTypeLabel(type) {
@@ -2445,6 +2579,11 @@ function AiAudit({
   businessId,
   sourceCompletion,
   onRunAudit,
+  placesSnapshot,
+  placesState,
+  placesNotice,
+  onRunPlacesLookup,
+  onImportGooglePlace,
 }) {
   const {
     summary,
@@ -2555,19 +2694,51 @@ function AiAudit({
             />
           </label>
 
-          <button
-            className={`primary-button audit-run-button ${
-              running ? "is-loading" : ""
-            }`}
-            onClick={onRunAudit}
-            disabled={running}
-            aria-busy={running}
-          >
-            {running ? <RefreshCw className="spin" size={17} /> : <Search size={17} />}
-            <span>{running ? "Running audit" : "Run AI search audit"}</span>
-          </button>
+          <div className="audit-setup-actions">
+            <button
+              className={`secondary-button places-lookup-button ${
+                placesState === "running" ? "is-loading" : ""
+              }`}
+              onClick={onRunPlacesLookup}
+              disabled={placesState === "running"}
+              aria-busy={placesState === "running"}
+            >
+              {placesState === "running" ? (
+                <RefreshCw className="spin" size={17} />
+              ) : (
+                <MapPin size={17} />
+              )}
+              <span>
+                {placesState === "running" ? "Finding place" : "Find on Google"}
+              </span>
+            </button>
+            <button
+              className={`primary-button audit-run-button ${
+                running ? "is-loading" : ""
+              }`}
+              onClick={onRunAudit}
+              disabled={running}
+              aria-busy={running}
+            >
+              {running ? (
+                <RefreshCw className="spin" size={17} />
+              ) : (
+                <Search size={17} />
+              )}
+              <span>{running ? "Running audit" : "Run AI search audit"}</span>
+            </button>
+          </div>
         </div>
       </section>
+
+      {(placesSnapshot || placesNotice || placesState === "running") && (
+        <GooglePlacesPanel
+          placesSnapshot={placesSnapshot}
+          placesState={placesState}
+          placesNotice={placesNotice}
+          onImportGooglePlace={onImportGooglePlace}
+        />
+      )}
 
       {(completed || running) && (
         <section className="audit-status-strip">
@@ -2791,6 +2962,261 @@ function AiAudit({
         </div>
       </section>
     </div>
+  );
+}
+
+function GooglePlacesPanel({
+  placesSnapshot,
+  placesState,
+  placesNotice,
+  onImportGooglePlace,
+}) {
+  const target = placesSnapshot?.target;
+  const candidates = placesSnapshot?.candidates || [];
+  const competitors = placesSnapshot?.competitors || [];
+  const fieldComparison = placesSnapshot?.fieldComparison || [];
+  const provider = placesSnapshot?.providerStatus?.[0];
+  const possibleMatches = target
+    ? candidates.filter((place) => place.id !== target.id).slice(0, 3)
+    : candidates.slice(0, 3);
+
+  return (
+    <section className="panel google-places-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Google Places</p>
+          <h2>Verified local profile match</h2>
+        </div>
+        <span
+          className={`status-chip places-status ${getGooglePlacesStatusClass(
+            placesSnapshot,
+            placesState
+          )}`}
+        >
+          {getGooglePlacesStatusLabel(placesSnapshot, placesState)}
+        </span>
+      </div>
+
+      {placesNotice && <p className="places-notice">{placesNotice}</p>}
+
+      {placesState === "running" && (
+        <article className="audit-status-card">
+          <MapPin size={16} />
+          <div>
+            <strong>Google Places lookup running</strong>
+            <span>Searching by business name, address, market, and category.</span>
+          </div>
+        </article>
+      )}
+
+      {provider && placesState !== "running" && (
+        <article className="audit-status-card">
+          <CheckCircle2 size={16} />
+          <div>
+            <strong>{provider.provider}</strong>
+            <span>
+              {provider.status.replace("_", " ")}: {provider.detail}
+            </span>
+          </div>
+        </article>
+      )}
+
+      {target && (
+        <div className="places-grid">
+          <article className="place-match-card">
+            <div className="place-match-main">
+              <span className="intent-chip">Best match</span>
+              <strong>{target.name}</strong>
+              <p>{target.address || "No Google address returned."}</p>
+              <div className="place-meta-row">
+                {target.rating && (
+                  <span>{formatGoogleRating(target)}</span>
+                )}
+                {target.phone && <span>{target.phone}</span>}
+                {target.primaryTypeLabel && <span>{target.primaryTypeLabel}</span>}
+              </div>
+              {target.matchReasons?.length > 0 && (
+                <div className="scan-notes">
+                  {target.matchReasons.map((reason) => (
+                    <span key={reason}>{reason}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="place-match-actions">
+              <strong>{target.matchScore}%</strong>
+              <span>match confidence</span>
+              <button
+                className="primary-button"
+                onClick={() => onImportGooglePlace(target)}
+              >
+                <Download size={17} />
+                <span>Import Google facts</span>
+              </button>
+              {target.mapsUrl && (
+                <a
+                  className="secondary-button"
+                  href={target.mapsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ArrowUpRight size={17} />
+                  <span>Open Maps</span>
+                </a>
+              )}
+            </div>
+          </article>
+
+          <div className="places-summary-grid">
+            <PlaceStat
+              label="Matched fields"
+              value={placesSnapshot.summary?.matchedFields || 0}
+            />
+            <PlaceStat
+              label="Google-only facts"
+              value={placesSnapshot.summary?.googleOnlyFields || 0}
+            />
+            <PlaceStat
+              label="Different fields"
+              value={placesSnapshot.summary?.differentFields || 0}
+            />
+            <PlaceStat
+              label="Local competitors"
+              value={placesSnapshot.summary?.competitorCount || 0}
+            />
+          </div>
+        </div>
+      )}
+
+      {fieldComparison.length > 0 && (
+        <div className="places-field-grid">
+          {fieldComparison.map((field) => (
+            <article className="place-field-card" key={field.field}>
+              <div className="place-field-head">
+                <strong>{field.label}</strong>
+                <span className={getPlaceFieldStatusClass(field.status)}>
+                  {getPlaceFieldStatusLabel(field.status)}
+                </span>
+              </div>
+              <dl>
+                <div>
+                  <dt>Profile</dt>
+                  <dd>{field.profileValue || "Missing"}</dd>
+                </div>
+                <div>
+                  <dt>Google</dt>
+                  <dd>{field.placeValue || "Missing"}</dd>
+                </div>
+              </dl>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {!target && placesSnapshot && placesState !== "running" && (
+        <div className="places-empty">
+          <AlertTriangle size={18} />
+          <div>
+            <strong>No confident Google place match found</strong>
+            <p>
+              Tighten the business name and full address, then run the lookup
+              again. Possible low-confidence matches are shown when Google
+              returns them.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {possibleMatches.length > 0 && (
+        <div className="places-competitor-section">
+          <div className="panel-head compact-head">
+            <div>
+              <p className="eyebrow">Possible matches</p>
+              <h3>Other Google results</h3>
+            </div>
+          </div>
+          <div className="places-card-grid">
+            {possibleMatches.map((place) => (
+              <GooglePlaceMiniCard
+                key={place.id}
+                place={place}
+                actionLabel="Import"
+                onAction={() => onImportGooglePlace(place)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {competitors.length > 0 && (
+        <div className="places-competitor-section">
+          <div className="panel-head compact-head">
+            <div>
+              <p className="eyebrow">Local competitors</p>
+              <h3>Nearby Google Places competitors</h3>
+            </div>
+          </div>
+          <div className="places-card-grid">
+            {competitors.map((place) => (
+              <GooglePlaceMiniCard key={place.id} place={place} />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PlaceStat({ label, value }) {
+  return (
+    <article className="place-stat">
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </article>
+  );
+}
+
+function GooglePlaceMiniCard({ place, actionLabel, onAction }) {
+  return (
+    <article className="google-place-card">
+      <strong>{place.name || "Unnamed place"}</strong>
+      <p>{place.address || "No address returned."}</p>
+      <div className="place-meta-row">
+        {place.rating && <span>{formatGoogleRating(place)}</span>}
+        {place.userRatingCount && <span>{place.userRatingCount} reviews</span>}
+        {place.primaryTypeLabel && <span>{place.primaryTypeLabel}</span>}
+      </div>
+      <div className="place-card-actions">
+        {place.website && (
+          <a
+            className="secondary-button compact-link"
+            href={place.website}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Globe2 size={15} />
+            <span>Website</span>
+          </a>
+        )}
+        {place.mapsUrl && (
+          <a
+            className="secondary-button compact-link"
+            href={place.mapsUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <MapPin size={15} />
+            <span>Maps</span>
+          </a>
+        )}
+        {onAction && (
+          <button className="secondary-button compact-link" onClick={onAction}>
+            <Download size={15} />
+            <span>{actionLabel}</span>
+          </button>
+        )}
+      </div>
+    </article>
   );
 }
 
