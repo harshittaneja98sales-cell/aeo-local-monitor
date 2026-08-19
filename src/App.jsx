@@ -373,8 +373,9 @@ function App() {
   async function runAudit() {
     if (auditState === "running") return;
     setAuditState("running");
+    setAuditMode("server-running");
     setServerAuditReport(null);
-    setAuditNotice("");
+    setAuditNotice("Crawling the website and checking live AI search results.");
 
     try {
       const response = await fetch("/api/audit", {
@@ -419,10 +420,12 @@ function App() {
           ].slice(0, 10)
         );
       }
-    } catch {
+    } catch (error) {
       setAuditMode("local-simulation");
       setAuditNotice(
-        "Live audit endpoint is unavailable on this static preview, so this run is using local simulation."
+        `Live audit endpoint failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }. Showing local simulation data instead.`
       );
       setPersistenceStatus({
         mode: "disabled",
@@ -1371,6 +1374,7 @@ function Overview({
 }
 
 function getAuditModeLabel(mode) {
+  if (mode === "server-running") return "Live audit running";
   if (mode === "openrouter-web-search") return "Live OpenRouter";
   if (mode === "openai-web-search") return "Live OpenAI";
   if (mode === "openai-error-fallback") return "OpenAI fallback";
@@ -1380,6 +1384,9 @@ function getAuditModeLabel(mode) {
 }
 
 function getAuditModeNotice(mode) {
+  if (mode === "server-running") {
+    return "The server is crawling the brand website and checking live AI search results.";
+  }
   if (mode === "openrouter-web-search") {
     return "ChatGPT-style rows are using live OpenRouter web-search output; the remaining providers are still modeled.";
   }
@@ -1932,7 +1939,7 @@ function AiAudit({
   const visibleResults = results.slice(0, 12);
   const completed = auditState === "complete";
   const running = auditState === "running";
-  const visibleAuditMode = auditReport.mode || auditMode;
+  const visibleAuditMode = running ? auditMode : auditReport.mode || auditMode;
   const modeNotice = auditNotice || getAuditModeNotice(visibleAuditMode);
 
   return (

@@ -495,6 +495,11 @@ function inferCategoryFromWebsite(website) {
     ["hair", "Salon"],
     ["law", "Law Firm"],
     ["legal", "Law Firm"],
+    ["motor", "Automotive"],
+    ["auto", "Automotive"],
+    ["car", "Automotive"],
+    ["dealer", "Automotive"],
+    ["vehicle", "Automotive"],
   ];
   const match = checks.find(([needle]) => value.includes(needle));
   return match ? match[1] : null;

@@ -14,6 +14,7 @@ const OPENROUTER_CHAT_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 const MAX_EXTRA_PAGES = 3;
 const FETCH_TIMEOUT_MS = 9000;
+const OPENROUTER_PROMPT_TIMEOUT_MS = 18000;
 
 export async function runServerAudit(payload = {}, env = process.env) {
   const request = normalizeAuditPayload(payload);
@@ -29,26 +30,30 @@ export async function runServerAudit(payload = {}, env = process.env) {
 
   if (openRouterApiKey) {
     try {
-      const openRouterResults = await runOpenRouterSearchAudit({
+      const openRouterBatch = await runOpenRouterSearchAudit({
         request,
         simulatedResults: simulatedAudit.results,
         websiteScan,
         env,
         openRouterApiKey,
       });
+      const openRouterStatus =
+        openRouterBatch.failedCount > 0 ? "partial" : "live";
 
       return buildLiveAudit({
         simulatedAudit,
-        liveResults: openRouterResults,
+        liveResults: openRouterBatch.results,
         websiteScan,
         entityGaps,
         mode: "openrouter-web-search",
         providerStatus: [
           {
             provider: "OpenRouter web search",
-            status: "live",
+            status: openRouterStatus,
             detail:
-              "ChatGPT-style rows use grounded OpenRouter output with web search.",
+              openRouterBatch.failedCount > 0
+                ? `${openRouterBatch.results.length - openRouterBatch.failedCount}/${openRouterBatch.results.length} ChatGPT-style rows used grounded OpenRouter output; slow rows used simulator fallback.`
+                : "ChatGPT-style rows use grounded OpenRouter output with web search.",
           },
           {
             provider: "Perplexity, Gemini, Google AI Overviews",
@@ -502,36 +507,52 @@ async function runOpenRouterSearchAudit({
       fallback: result,
     }));
 
-  const results = [];
-  for (const item of prompts) {
-    results.push(
-      await runOpenRouterPrompt({
-        env,
-        openRouterApiKey,
-        request,
-        prompt: item.prompt,
-        fallback: item.fallback,
-        websiteScan,
-      })
-    );
+  const settled = await Promise.all(
+    prompts.map(async (item) => {
+      try {
+        return {
+          status: "fulfilled",
+          value: await runOpenRouterPrompt({
+            env,
+            openRouterApiKey,
+            request,
+            prompt: item.prompt,
+            fallback: item.fallback,
+            websiteScan,
+          }),
+        };
+      } catch (error) {
+        return {
+          status: "rejected",
+          value: buildPromptFallbackResult({
+            fallback: item.fallback,
+            providerLabel: "OpenRouter web search",
+            error,
+          }),
+        };
+      }
+    })
+  );
+  const failedCount = settled.filter((item) => item.status === "rejected").length;
+
+  if (failedCount === settled.length) {
+    throw new Error("OpenRouter web search failed for every audited prompt.");
   }
-  return results;
+
+  return {
+    results: settled.map((item) => item.value),
+    failedCount,
+  };
 }
 
-async function runOpenAiPrompt({ client, env, request, prompt, fallback, websiteScan }) {
-  const response = await createOpenAiResponse(client, env, {
-    model: env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
-    input: buildOpenAiAuditPrompt(request, prompt, websiteScan),
-  });
-  const outputText = extractOutputText(response);
-  return buildLivePromptResult({
-    response,
-    outputText,
-    request,
-    fallback,
-    providerMode: "live-openai-web-search",
-    providerLabel: "OpenAI web search",
-  });
+function buildPromptFallbackResult({ fallback, providerLabel, error }) {
+  return {
+    ...fallback,
+    providerMode: "live-provider-prompt-fallback",
+    responseExcerpt: "",
+    finding: `${providerLabel} did not return a usable answer for this prompt, so this row used simulator scoring. ${fallback.finding}`,
+    providerError: getErrorMessage(error, "Provider prompt failed."),
+  };
 }
 
 async function runOpenRouterPrompt({
@@ -565,6 +586,22 @@ async function runOpenRouterPrompt({
     fallback,
     providerMode: "live-openrouter-web-search",
     providerLabel: "OpenRouter web search",
+  });
+}
+
+async function runOpenAiPrompt({ client, env, request, prompt, fallback, websiteScan }) {
+  const response = await createOpenAiResponse(client, env, {
+    model: env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+    input: buildOpenAiAuditPrompt(request, prompt, websiteScan),
+  });
+  const outputText = extractOutputText(response);
+  return buildLivePromptResult({
+    response,
+    outputText,
+    request,
+    fallback,
+    providerMode: "live-openai-web-search",
+    providerLabel: "OpenAI web search",
   });
 }
 
@@ -632,6 +669,14 @@ async function createOpenAiResponse(client, env, request) {
 }
 
 async function createOpenRouterChatCompletion(env, apiKey, request) {
+  const timeoutMs = parseIntegerEnv(
+    env.OPENROUTER_PROMPT_TIMEOUT_MS,
+    OPENROUTER_PROMPT_TIMEOUT_MS,
+    5000,
+    60000
+  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const body = {
     ...request,
     tools: [
@@ -645,20 +690,33 @@ async function createOpenRouterChatCompletion(env, apiKey, request) {
       },
     ],
   };
-  const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
-    method: "POST",
-    headers: buildOpenRouterHeaders(env, apiKey),
-    body: JSON.stringify(body),
-  });
 
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(
-      `OpenRouter HTTP ${response.status}: ${truncateText(detail, 500)}`
-    );
+  try {
+    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
+      method: "POST",
+      headers: buildOpenRouterHeaders(env, apiKey),
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(
+        `OpenRouter HTTP ${response.status}: ${truncateText(detail, 500)}`
+      );
+    }
+
+    return response.json();
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(
+        `OpenRouter prompt timed out after ${Math.round(timeoutMs / 1000)} seconds.`
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return response.json();
 }
 
 function buildOpenRouterHeaders(env, apiKey) {
