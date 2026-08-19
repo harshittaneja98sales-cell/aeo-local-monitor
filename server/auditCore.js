@@ -7,7 +7,7 @@ import {
   summarizeCompetitorShare,
 } from "../src/lib/auditSimulation.js";
 
-const DEFAULT_OPENAI_MODEL = "gpt-5.6";
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
 const MAX_EXTRA_PAGES = 3;
 const FETCH_TIMEOUT_MS = 9000;
 
