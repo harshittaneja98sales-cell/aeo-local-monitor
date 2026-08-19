@@ -2242,12 +2242,6 @@ function AiAudit({
         />
       </section>
 
-      <SavedAuditRunsPanel
-        savedAuditRuns={savedAuditRuns}
-        persistenceStatus={persistenceStatus}
-        businessId={businessId}
-      />
-
       <section className="panel wide">
         <div className="panel-head">
           <div>
@@ -2390,78 +2384,6 @@ function ScanCheck({ label, done }) {
       <span>{label}</span>
     </div>
   );
-}
-
-function SavedAuditRunsPanel({ savedAuditRuns, persistenceStatus, businessId }) {
-  const connected = persistenceStatus?.mode === "database";
-  const errored = persistenceStatus?.mode === "error";
-  const hasRuns = savedAuditRuns.length > 0;
-  const statusLabel = hasRuns
-    ? "Tracking active"
-    : errored
-      ? "History issue"
-      : businessId || connected
-        ? "Ready"
-        : "Not started";
-  const statusClass = hasRuns || connected
-    ? "status-chip database-ready"
-    : errored
-      ? "status-chip database-error"
-      : "status-chip";
-  const note = hasRuns
-    ? "Past audits are saved for trend tracking, reporting, and before-after comparisons."
-    : errored
-      ? "This run completed, but history could not be updated. You can still review the current audit results."
-      : businessId || connected
-        ? "Run the next audit to add a point to the trend history."
-        : "Run the first audit to start trend history for this business.";
-
-  return (
-    <section className="panel saved-runs-panel">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">Audit history</p>
-          <h2>Saved audit runs</h2>
-        </div>
-        <span className={statusClass}>{statusLabel}</span>
-      </div>
-
-      <p className="saved-runs-note">{note}</p>
-
-      {hasRuns ? (
-        <div className="saved-run-list">
-          {savedAuditRuns.map((run) => (
-            <article className="saved-run-row" key={run.id}>
-              <div>
-                <strong>{formatRunDate(run.createdAt)}</strong>
-                <span>{getAuditModeLabel(run.mode)}</span>
-              </div>
-              <div className="saved-run-scores">
-                <Metric label="Share" value={`${run.summary?.shareOfVoice ?? 0}%`} />
-                <Metric label="Mentions" value={run.summary?.mentions ?? 0} />
-                <Metric label="Score" value={run.summary?.mentionScore ?? 0} />
-              </div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <div className="empty-state compact">
-          <strong>No saved audits yet</strong>
-          <span>Run an audit to create the first history entry.</span>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function formatRunDate(value) {
-  if (!value) return "Just now";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }
 
 function AuditMetric({ label, value, detail }) {
