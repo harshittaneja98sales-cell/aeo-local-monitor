@@ -97,6 +97,27 @@ const defaultMonitorSummary = {
 };
 const AUDIT_CLIENT_TIMEOUT_MS = 35000;
 
+function createEmptyProfile(selectedBusinessType = "plumbing") {
+  const businessType =
+    businessTypes.find((type) => type.id === selectedBusinessType) ||
+    businessTypes[0];
+
+  return {
+    name: "",
+    businessType: businessType.label,
+    category: "",
+    market: "",
+    website: "",
+    phone: "",
+    address: "",
+    hours: "",
+    serviceArea: "",
+    services: "",
+    credential: "",
+    bookingUrl: "",
+  };
+}
+
 function getInitialWorkspace() {
   const fallbackType = "plumbing";
   const saved = readStoredWorkspace();
@@ -107,23 +128,22 @@ function getInitialWorkspace() {
   const templateType =
     businessTypes.find((type) => type.id === selectedBusinessType) ||
     businessTypes[0];
-  const template = businessTemplates[selectedBusinessType];
+  const hasSavedBusiness =
+    Boolean(saved?.businessId) ||
+    Boolean(saved?.profile?.website) ||
+    Boolean(saved?.profile?.name);
 
   return {
     businessId: saved?.businessId || null,
     selectedBusinessType,
-    profile: { ...template.business, ...saved?.profile },
+    profile: hasSavedBusiness
+      ? { ...createEmptyProfile(selectedBusinessType), ...saved?.profile }
+      : createEmptyProfile(selectedBusinessType),
     competitors: saved?.competitors || [
       templateType.competitorA,
       templateType.competitorB,
     ],
-    monitoredLocations:
-      saved?.monitoredLocations ||
-      template.business.serviceArea
-        .split(",")
-        .map((location) => location.trim())
-        .filter(Boolean)
-        .slice(0, 4),
+    monitoredLocations: saved?.monitoredLocations || [],
   };
 }
 
@@ -131,10 +151,32 @@ function readStoredWorkspace() {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem("aeo-local-workspace");
-    return raw ? JSON.parse(raw) : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (isDemoWorkspace(parsed)) {
+      window.localStorage.removeItem("aeo-local-workspace");
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
+}
+
+function isDemoWorkspace(workspace) {
+  const name = normalizeAuditKeyValue(workspace?.profile?.name);
+  const website = normalizeAuditKeyValue(workspace?.profile?.website);
+  const demoNames = new Set(
+    businessTypes.map((type) => normalizeAuditKeyValue(type.profile.name))
+  );
+  const demoWebsites = new Set(
+    businessTypes.map((type) => normalizeAuditKeyValue(type.profile.website))
+  );
+
+  return (
+    (name && demoNames.has(name)) ||
+    (website && demoWebsites.has(website)) ||
+    website.endsWith(".example")
+  );
 }
 
 function calculateSourceCompletion(profile, competitors, monitoredLocations) {
@@ -283,6 +325,19 @@ function App() {
   const graphSources = template.graphSources;
   const prompts = template.prompts;
   const remediationTasks = template.remediationTasks;
+  const profileHasIdentity = Boolean(
+    String(profile.name || "").trim() || String(profile.website || "").trim()
+  );
+  const topbarTitle = profileHasIdentity
+    ? profile.name || inferBusinessNameFromWebsite(profile.website) || "Website audit"
+    : "Start a new AI visibility audit";
+  const contextPills = [
+    [Building2, profile.businessType],
+    [Building2, profile.category],
+    [MapPin, profile.market],
+    [Globe2, profile.website],
+    [Clock3, profile.hours],
+  ].filter(([, label]) => String(label || "").trim());
   const score = useMemo(
     () => calculateVisibilityScore(engines, graphSources, remediationTasks),
     [graphSources, remediationTasks]
@@ -465,19 +520,30 @@ function App() {
   }
 
   function changeBusinessType(typeId) {
-    const nextTemplate = businessTemplates[typeId];
     const nextType = businessTypes.find((type) => type.id === typeId);
+    const nextTemplate = businessTemplates[typeId];
     resetAuditResult();
-    setWorkspace({
-      businessId: null,
-      selectedBusinessType: typeId,
-      profile: nextTemplate.business,
-      competitors: nextType ? [nextType.competitorA, nextType.competitorB] : [],
-      monitoredLocations: nextTemplate.business.serviceArea
-        .split(",")
-        .map((location) => location.trim())
-        .filter(Boolean)
-        .slice(0, 4),
+    setWorkspace((current) => {
+      const hasCurrentProfile = Boolean(
+        String(current.profile.website || "").trim() ||
+          String(current.profile.name || "").trim()
+      );
+
+      return {
+        businessId: null,
+        selectedBusinessType: typeId,
+        profile: hasCurrentProfile
+          ? {
+              ...current.profile,
+              businessType: nextType?.label || current.profile.businessType,
+              category: current.profile.category || nextType?.categoryTerm || "",
+              services:
+                current.profile.services || nextType?.highIntentService || "",
+            }
+          : createEmptyProfile(typeId),
+        competitors: nextType ? [nextType.competitorA, nextType.competitorB] : [],
+        monitoredLocations: hasCurrentProfile ? current.monitoredLocations : [],
+      };
     });
     setSelectedTask(nextTemplate.remediationTasks[0]);
     setScanState("idle");
@@ -1015,7 +1081,7 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">Local AI visibility</p>
-            <h1>{profile.name}</h1>
+            <h1>{topbarTitle}</h1>
           </div>
           <div className="topbar-actions">
             <button className="secondary-button" onClick={showLanding}>
@@ -1049,13 +1115,13 @@ function App() {
           </div>
         </header>
 
-        <section className="context-strip">
-          <InfoPill icon={Building2} label={profile.businessType} />
-          <InfoPill icon={Building2} label={profile.category} />
-          <InfoPill icon={MapPin} label={profile.market} />
-          <InfoPill icon={Globe2} label={profile.website} />
-          <InfoPill icon={Clock3} label={profile.hours} />
-        </section>
+        {contextPills.length > 0 && (
+          <section className="context-strip">
+            {contextPills.map(([Icon, label], index) => (
+              <InfoPill icon={Icon} label={label} key={`${label}-${index}`} />
+            ))}
+          </section>
+        )}
 
         {activeTab === "overview" && (
           <Overview
