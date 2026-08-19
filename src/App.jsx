@@ -2962,6 +2962,9 @@ function AiAudit({
               (result) =>
                 isLiveProviderResult(result) || isProviderFallbackResult(result)
             );
+            const rawAnswerResult =
+              livePromptResults[0] ||
+              promptResults.find((result) => result.engineId === "chatgpt-search");
 
             return (
               <article className="prompt-card" key={prompt.id}>
@@ -2989,32 +2992,7 @@ function AiAudit({
                     </span>
                   ))}
                 </div>
-                {livePromptResults.length > 0 && (
-                  <div className="prompt-evidence-list">
-                    {livePromptResults.map((result) => (
-                      <article className="prompt-evidence" key={`${result.id}-evidence`}>
-                        <div>
-                          <strong>
-                            {getEngineDisplayName(result.engine)} live evidence
-                          </strong>
-                          <span className={getResultChipClass(result)}>
-                            <span>{getResultOutcomeLabel(result)}</span>
-                          </span>
-                        </div>
-                        <p>
-                          {result.responseExcerpt
-                            ? result.responseExcerpt
-                            : result.finding}
-                        </p>
-                        <small>
-                          {result.source
-                            ? `Source: ${result.source}`
-                            : "No direct citation found"}
-                        </small>
-                      </article>
-                    ))}
-                  </div>
-                )}
+                <PromptRawAnswer result={rawAnswerResult} />
               </article>
             );
           })}
@@ -3363,6 +3341,47 @@ function GooglePlaceMiniCard({ place, actionLabel, onAction }) {
           </button>
         )}
       </div>
+    </article>
+  );
+}
+
+function PromptRawAnswer({ result }) {
+  const isLive = result && isLiveProviderResult(result);
+  const isFallback = result && isProviderFallbackResult(result);
+  const rawText = String(result?.responseExcerpt || "").trim();
+  const statusLabel = result ? getResultOutcomeLabel(result) : "Unavailable";
+  const body = rawText
+    ? rawText
+    : isFallback
+      ? result.providerError ||
+        "The live provider request fell back before returning raw answer text."
+      : isLive
+        ? "The live provider returned no raw answer text for this prompt."
+        : "Raw provider text is not available for modeled rows.";
+
+  return (
+    <article
+      className={`prompt-raw-answer ${
+        rawText ? "has-raw-answer" : "missing-raw-answer"
+      }`}
+    >
+      <div className="prompt-raw-head">
+        <strong>{rawText ? "Raw live answer" : "Raw answer"}</strong>
+        {result && (
+          <span className={getResultChipClass(result)}>
+            <span>{statusLabel}</span>
+            <small>{getResultProviderLabel(result)}</small>
+          </span>
+        )}
+      </div>
+      <pre>{body}</pre>
+      <small>
+        {result?.source
+          ? `Citation source: ${result.source}`
+          : rawText
+            ? "No direct citation found in the raw answer"
+            : "Only connected live providers can return raw answer text"}
+      </small>
     </article>
   );
 }

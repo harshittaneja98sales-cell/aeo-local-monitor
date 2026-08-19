@@ -2132,6 +2132,52 @@ button {
   font-size: 12px;
 }
 
+.prompt-raw-answer {
+  border: 1px solid #d9e0e8;
+  border-radius: 8px;
+  background: #f8fafc;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.prompt-raw-answer.has-raw-answer {
+  border-color: #bbf7d0;
+  background: #f7fef9;
+}
+
+.prompt-raw-answer.missing-raw-answer {
+  border-color: #f8d48b;
+  background: #fffbeb;
+}
+
+.prompt-raw-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prompt-raw-head > strong {
+  font-size: 13px;
+}
+
+.prompt-raw-answer pre {
+  color: #334155;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.prompt-raw-answer > small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .result-chip {
   display: inline-flex;
   align-items: center;
