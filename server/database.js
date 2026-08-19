@@ -108,6 +108,8 @@ CREATE INDEX IF NOT EXISTS monitor_alerts_business_created_idx
   ON monitor_alerts (business_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS monitor_alerts_business_status_idx
   ON monitor_alerts (business_id, status);
+CREATE INDEX IF NOT EXISTS monitor_alerts_audit_run_idx
+  ON monitor_alerts (audit_run_id);
 `;
 
 export function isDatabaseConfigured(env = process.env) {
