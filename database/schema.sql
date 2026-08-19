@@ -91,6 +91,30 @@ CREATE INDEX IF NOT EXISTS audit_runs_business_created_idx
   ON audit_runs (business_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS schema_patches_business_created_idx
   ON schema_patches (business_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS answer_hubs (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'ready',
+  title TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'local-answer-builder',
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  visual_html TEXT NOT NULL DEFAULT '',
+  schema_type TEXT NOT NULL DEFAULT 'FAQPage',
+  schema_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  embed_code TEXT NOT NULL DEFAULT '',
+  widget_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  intent_summary JSONB NOT NULL DEFAULT '[]'::jsonb,
+  provider_status JSONB NOT NULL DEFAULT '[]'::jsonb,
+  profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS answer_hubs_business_created_idx
+  ON answer_hubs (business_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS monitor_configs_next_run_idx
   ON monitor_configs (enabled, next_run_at);
 CREATE INDEX IF NOT EXISTS monitor_alerts_business_created_idx
@@ -103,11 +127,20 @@ CREATE INDEX IF NOT EXISTS monitor_alerts_audit_run_idx
 ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE schema_patches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE answer_hubs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE monitor_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE monitor_alerts ENABLE ROW LEVEL SECURITY;
 
+GRANT SELECT, INSERT, UPDATE ON answer_hubs TO aeo_local_app;
 GRANT SELECT, INSERT, UPDATE ON monitor_configs TO aeo_local_app;
 GRANT SELECT, INSERT, UPDATE ON monitor_alerts TO aeo_local_app;
+
+CREATE POLICY aeo_local_app_answer_hubs_access
+  ON answer_hubs
+  FOR ALL
+  TO aeo_local_app
+  USING (true)
+  WITH CHECK (true);
 
 CREATE POLICY aeo_local_app_monitor_configs_access
   ON monitor_configs

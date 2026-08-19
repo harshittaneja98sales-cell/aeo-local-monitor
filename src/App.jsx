@@ -46,6 +46,7 @@ const tabs = [
   ["audit", "AI Audit", Bot],
   ["schema", "Schema Fix", Code2],
   ["monitoring", "Monitor", ShieldCheck],
+  ["answerHub", "Answer Hub", FileText],
   ["onboarding", "Onboarding", ClipboardList],
   ["overview", "Overview", CircleGauge],
   ["prompts", "Prompts", Search],
@@ -215,6 +216,9 @@ function App() {
   const [monitorSummary, setMonitorSummary] = useState(defaultMonitorSummary);
   const [monitorState, setMonitorState] = useState("ready");
   const [monitorNotice, setMonitorNotice] = useState("");
+  const [answerHub, setAnswerHub] = useState(null);
+  const [answerHubState, setAnswerHubState] = useState("ready");
+  const [answerHubNotice, setAnswerHubNotice] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState({
     mode: "unknown",
     detail: "Run an audit to start building trend history.",
@@ -352,6 +356,33 @@ function App() {
     };
   }, [businessId]);
 
+  useEffect(() => {
+    if (!businessId) {
+      setAnswerHub(null);
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/answer-hub?businessId=${encodeURIComponent(businessId)}`)
+      .then((response) => {
+        if (!response.ok) throw new Error("Answer hub endpoint failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        if (data.answerHub) setAnswerHub(data.answerHub);
+        if (data.persistence) setPersistenceStatus(data.persistence);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAnswerHubNotice("Saved answer hub could not be loaded.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
   function setProfile(nextProfile) {
     resetAuditResult();
     setWorkspace((current) => ({
@@ -412,6 +443,9 @@ function App() {
     setSchemaPatch(null);
     setSchemaState("ready");
     setSchemaNotice("");
+    setAnswerHub(null);
+    setAnswerHubState("ready");
+    setAnswerHubNotice("");
     setAuditState((current) => (current === "running" ? current : "ready"));
   }
 
@@ -548,6 +582,91 @@ function App() {
       );
     } finally {
       setSchemaState("complete");
+    }
+  }
+
+  async function runAnswerHubBuilder() {
+    if (answerHubState === "running") return;
+    setAnswerHubState("running");
+    setAnswerHubNotice("");
+
+    try {
+      const response = await fetch("/api/answer-hub", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(buildServerPayload({ auditReport })),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Answer hub endpoint returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!data.answerHub) {
+        throw new Error("Answer hub endpoint returned an empty payload");
+      }
+
+      setAnswerHub(data.answerHub);
+      if (data.persistence) setPersistenceStatus(data.persistence);
+      if (data.business?.id) {
+        setWorkspace((current) => ({
+          ...current,
+          businessId: data.business.id,
+        }));
+      }
+      setAnswerHubNotice(
+        data.savedHub
+          ? "Answer hub saved and embed content updated."
+          : "Answer hub generated. Connect the database to publish the embed."
+      );
+    } catch (error) {
+      setAnswerHubNotice(
+        error instanceof Error
+          ? error.message
+          : "Answer hub could not be generated."
+      );
+    } finally {
+      setAnswerHubState("ready");
+    }
+  }
+
+  async function saveAnswerHubChanges(nextHub = answerHub) {
+    if (!nextHub || answerHubState === "saving") return;
+    setAnswerHub(nextHub);
+    setAnswerHubState("saving");
+    setAnswerHubNotice("");
+
+    try {
+      const response = await fetch("/api/answer-hub", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          buildServerPayload({ action: "save", answerHub: nextHub })
+        ),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Answer hub save returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.answerHub) setAnswerHub(data.answerHub);
+      if (data.persistence) setPersistenceStatus(data.persistence);
+      if (data.business?.id) {
+        setWorkspace((current) => ({
+          ...current,
+          businessId: data.business.id,
+        }));
+      }
+      setAnswerHubNotice("Approved answers saved to the live hub.");
+    } catch (error) {
+      setAnswerHubNotice(
+        error instanceof Error
+          ? error.message
+          : "Answer hub changes could not be saved."
+      );
+    } finally {
+      setAnswerHubState("ready");
     }
   }
 
@@ -864,6 +983,20 @@ function App() {
             providerStatus={auditReport.providerStatus || []}
             onSaveConfig={saveMonitorConfig}
             onRunMonitor={runContinuousMonitor}
+          />
+        )}
+        {activeTab === "answerHub" && (
+          <AnswerHubBuilder
+            profile={profile}
+            selectedBusinessType={selectedBusinessType}
+            businessTypes={businessTypes}
+            auditReport={auditReport}
+            answerHub={answerHub}
+            answerHubState={answerHubState}
+            answerHubNotice={answerHubNotice}
+            persistenceStatus={persistenceStatus}
+            onGenerateHub={runAnswerHubBuilder}
+            onSaveHub={saveAnswerHubChanges}
           />
         )}
         {activeTab === "onboarding" && (
@@ -2006,11 +2139,295 @@ function SchemaFix({
   );
 }
 
+function AnswerHubBuilder({
+  profile,
+  selectedBusinessType,
+  businessTypes,
+  auditReport,
+  answerHub,
+  answerHubState,
+  answerHubNotice,
+  persistenceStatus,
+  onGenerateHub,
+  onSaveHub,
+}) {
+  const [copiedTarget, setCopiedTarget] = useState("");
+  const businessType = businessTypes.find(
+    (type) => type.id === selectedBusinessType
+  );
+  const running = answerHubState === "running";
+  const saving = answerHubState === "saving";
+  const items = answerHub?.items || [];
+  const approvedItems = items.filter((item) => item.approved !== false);
+  const wordCounts = items.map((item) => item.wordCount || countWords(item.answer));
+  const wordRange =
+    wordCounts.length > 0
+      ? `${Math.min(...wordCounts)}-${Math.max(...wordCounts)}`
+      : "0";
+  const schemaSnippet = answerHub
+    ? `<script type="application/ld+json">\n${JSON.stringify(
+        answerHub.schemaJson,
+        null,
+        2
+      )}\n</script>`
+    : "";
+
+  async function copyText(label, value) {
+    if (!navigator.clipboard || !value) return;
+    await navigator.clipboard.writeText(value);
+    setCopiedTarget(label);
+    window.setTimeout(() => setCopiedTarget(""), 1600);
+  }
+
+  function toggleApproval(itemId) {
+    if (!answerHub || saving) return;
+    const nextHub = {
+      ...answerHub,
+      items: answerHub.items.map((item) =>
+        item.id === itemId ? { ...item, approved: item.approved === false } : item
+      ),
+    };
+    onSaveHub(nextHub);
+  }
+
+  return (
+    <div className="answer-hub-workspace">
+      <section className="panel answer-hub-control">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Feature 4</p>
+            <h2>AI-Optimized Direct-Answer Q&A & Entity Hub Builder</h2>
+          </div>
+          <span
+            className={
+              persistenceStatus.mode === "database"
+                ? "status-chip database-ready"
+                : "status-chip"
+            }
+          >
+            {running ? "Generating" : saving ? "Saving" : "Ready"}
+          </span>
+        </div>
+
+        <div className="answer-hub-action-row">
+          <div className="answer-hub-context">
+            <InfoPill icon={Building2} label={profile.name || "Business"} />
+            <InfoPill icon={Globe2} label={profile.website || "Website missing"} />
+            <InfoPill icon={MapPin} label={profile.market || "Market missing"} />
+            <InfoPill
+              icon={FileText}
+              label={businessType?.categoryTerm || profile.category || "Local intent"}
+            />
+          </div>
+          <div className="schema-button-row">
+            {answerHub && (
+              <button
+                className="secondary-button"
+                onClick={() => onSaveHub(answerHub)}
+                disabled={running || saving}
+              >
+                {saving ? <RefreshCw className="spin" size={16} /> : <CheckCircle2 size={16} />}
+                <span>{saving ? "Saving" : "Save hub"}</span>
+              </button>
+            )}
+            <button
+              className={`primary-button ${running ? "is-loading" : ""}`}
+              onClick={onGenerateHub}
+              disabled={running || saving}
+            >
+              {running ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />}
+              <span>{running ? "Generating" : answerHub ? "Regenerate hub" : "Generate answer hub"}</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="answer-hub-summary-grid">
+        <AuditMetric
+          label="Intent questions"
+          value={items.length}
+          detail={`${auditReport.prompts?.length || 0} audit prompts available`}
+        />
+        <AuditMetric
+          label="Approved answers"
+          value={`${approvedItems.length}/${items.length || 0}`}
+          detail="Included in widget and schema"
+        />
+        <AuditMetric
+          label="Answer length"
+          value={wordRange}
+          detail="Words per direct answer"
+        />
+        <AuditMetric
+          label="Structured data"
+          value={answerHub?.schemaType || "FAQPage"}
+          detail="Matches approved on-page answers"
+        />
+      </section>
+
+      {answerHubNotice && <p className="answer-hub-notice">{answerHubNotice}</p>}
+
+      {!answerHub ? (
+        <section className="panel answer-hub-empty">
+          <FileText size={24} />
+          <div>
+            <p className="eyebrow">Growth engine</p>
+            <h2>No direct-answer hub generated yet</h2>
+            <p>
+              Generate Q&A from the saved business facts, current audit prompts,
+              service area, hours, and competitors.
+            </p>
+          </div>
+          <button className="primary-button" onClick={onGenerateHub} disabled={running}>
+            {running ? <RefreshCw className="spin" size={17} /> : <Sparkles size={17} />}
+            <span>{running ? "Generating" : "Generate answer hub"}</span>
+          </button>
+        </section>
+      ) : (
+        <>
+          <section className="answer-hub-split">
+            <div className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Prompt-to-intent extraction</p>
+                  <h2>Questions to win long-tail AI answers</h2>
+                </div>
+                <span className="quiet-status">{answerHub.mode}</span>
+              </div>
+              <div className="answer-list">
+                {items.map((item) => (
+                  <article
+                    className={
+                      item.approved === false
+                        ? "answer-card paused"
+                        : "answer-card approved"
+                    }
+                    key={item.id}
+                  >
+                    <div className="answer-card-head">
+                      <span className="intent-chip">{item.intent}</span>
+                      <button
+                        className={
+                          item.approved === false
+                            ? "answer-approval"
+                            : "answer-approval active"
+                        }
+                        onClick={() => toggleApproval(item.id)}
+                        disabled={saving}
+                      >
+                        <CheckCircle2 size={15} />
+                        <span>{item.approved === false ? "Paused" : "Approved"}</span>
+                      </button>
+                    </div>
+                    <h3>{item.question}</h3>
+                    <div className="answer-meta">
+                      <span>{item.source}</span>
+                      <span>{item.targetPage}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Direct answers</p>
+                  <h2>Ground-truth formatted responses</h2>
+                </div>
+                <FileText size={19} />
+              </div>
+              <div className="answer-output-list">
+                {items.map((item) => (
+                  <article className="answer-output-card" key={item.id}>
+                    <div>
+                      <strong>{item.intent}</strong>
+                      <span>{item.wordCount || countWords(item.answer)} words</span>
+                    </div>
+                    <p>{item.answer}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="hub-code-grid">
+            <div className="panel schema-code-panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Visual layer</p>
+                  <h2>Accordion block</h2>
+                </div>
+                <button
+                  className="secondary-button"
+                  onClick={() => copyText("html", answerHub.visualHtml)}
+                >
+                  <Copy size={16} />
+                  <span>{copiedTarget === "html" ? "Copied" : "Copy HTML"}</span>
+                </button>
+              </div>
+              <pre className="schema-code">{answerHub.visualHtml}</pre>
+            </div>
+
+            <div className="panel schema-code-panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Semantic layer</p>
+                  <h2>FAQPage JSON-LD</h2>
+                </div>
+                <button
+                  className="secondary-button"
+                  onClick={() => copyText("schema", schemaSnippet)}
+                >
+                  <Copy size={16} />
+                  <span>{copiedTarget === "schema" ? "Copied" : "Copy JSON-LD"}</span>
+                </button>
+              </div>
+              <pre className="schema-code">{schemaSnippet}</pre>
+            </div>
+          </section>
+
+          <section className="panel answer-widget-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Dynamic widget</p>
+                <h2>One-line live embed</h2>
+              </div>
+              <button
+                className="secondary-button"
+                onClick={() => copyText("embed", answerHub.embedCode)}
+              >
+                <Copy size={16} />
+                <span>{copiedTarget === "embed" ? "Copied" : "Copy script"}</span>
+              </button>
+            </div>
+            <pre className="schema-code compact-code">{answerHub.embedCode}</pre>
+            <div className="answer-preview-list">
+              {approvedItems.map((item) => (
+                <details key={item.id}>
+                  <summary>{item.question}</summary>
+                  <p>{item.answer}</p>
+                </details>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
 function slugForFile(value) {
   return String(value || "schema")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function countWords(value) {
+  return String(value || "")
+    .split(/\s+/)
+    .filter(Boolean).length;
 }
 
 function AiAudit({

@@ -66,6 +66,29 @@ CREATE TABLE IF NOT EXISTS schema_patches (
 CREATE INDEX IF NOT EXISTS schema_patches_business_created_idx
   ON schema_patches (business_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS answer_hubs (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'ready',
+  title TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'local-answer-builder',
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  visual_html TEXT NOT NULL DEFAULT '',
+  schema_type TEXT NOT NULL DEFAULT 'FAQPage',
+  schema_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  embed_code TEXT NOT NULL DEFAULT '',
+  widget_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  intent_summary JSONB NOT NULL DEFAULT '[]'::jsonb,
+  provider_status JSONB NOT NULL DEFAULT '[]'::jsonb,
+  profile_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+  request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS answer_hubs_business_created_idx
+  ON answer_hubs (business_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS monitor_configs (
   id TEXT PRIMARY KEY,
   business_id TEXT UNIQUE NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
@@ -293,6 +316,76 @@ export async function saveSchemaPatch(
   return serializeSchemaPatch(result.rows[0]);
 }
 
+export async function saveAnswerHub(
+  { businessId, answerHub, request },
+  env = process.env
+) {
+  await ensureSchema(env);
+  const client = getPool(env);
+  const id = answerHub.id || crypto.randomUUID();
+  const result = await client.query(
+    `
+    INSERT INTO answer_hubs (
+      id,
+      business_id,
+      status,
+      title,
+      mode,
+      items,
+      visual_html,
+      schema_type,
+      schema_json,
+      embed_code,
+      widget_payload,
+      intent_summary,
+      provider_status,
+      profile_snapshot,
+      request_payload
+    )
+    VALUES (
+      $1, $2, $3, $4, $5,
+      $6::jsonb, $7, $8, $9::jsonb, $10,
+      $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      status = EXCLUDED.status,
+      title = EXCLUDED.title,
+      mode = EXCLUDED.mode,
+      items = EXCLUDED.items,
+      visual_html = EXCLUDED.visual_html,
+      schema_type = EXCLUDED.schema_type,
+      schema_json = EXCLUDED.schema_json,
+      embed_code = EXCLUDED.embed_code,
+      widget_payload = EXCLUDED.widget_payload,
+      intent_summary = EXCLUDED.intent_summary,
+      provider_status = EXCLUDED.provider_status,
+      profile_snapshot = EXCLUDED.profile_snapshot,
+      request_payload = EXCLUDED.request_payload,
+      updated_at = now()
+    RETURNING *
+    `,
+    [
+      id,
+      businessId,
+      answerHub.status || "ready",
+      answerHub.title || "Direct-answer hub",
+      answerHub.mode || "local-answer-builder",
+      JSON.stringify(answerHub.items || []),
+      answerHub.visualHtml || "",
+      answerHub.schemaType || "FAQPage",
+      JSON.stringify(answerHub.schemaJson || {}),
+      answerHub.embedCode || "",
+      JSON.stringify(answerHub.widgetPayload || {}),
+      JSON.stringify(answerHub.intentSummary || []),
+      JSON.stringify(answerHub.providerStatus || []),
+      JSON.stringify(answerHub.profileSnapshot || request?.profile || {}),
+      JSON.stringify(request || {}),
+    ]
+  );
+
+  return serializeAnswerHub(result.rows[0]);
+}
+
 export async function listBusinesses(env = process.env) {
   await ensureSchema(env);
   const result = await getPool(env).query(
@@ -320,6 +413,21 @@ export async function listAuditRuns({ businessId, limit = 10 }, env = process.en
     [businessId, parsedLimit]
   );
   return result.rows.map(serializeAuditRun);
+}
+
+export async function getLatestAnswerHub({ businessId }, env = process.env) {
+  await ensureSchema(env);
+  const result = await getPool(env).query(
+    `
+    SELECT *
+    FROM answer_hubs
+    WHERE business_id = $1
+    ORDER BY updated_at DESC, created_at DESC
+    LIMIT 1
+    `,
+    [businessId]
+  );
+  return result.rows[0] ? serializeAnswerHub(result.rows[0]) : null;
 }
 
 export async function getBusinessById(businessId, env = process.env) {
@@ -744,6 +852,27 @@ function serializeSchemaPatch(row) {
     installTargets: row.install_targets || [],
     validationUrl: row.validation_url,
     createdAt: row.created_at,
+  };
+}
+
+function serializeAnswerHub(row) {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    status: row.status,
+    title: row.title,
+    mode: row.mode,
+    items: row.items || [],
+    visualHtml: row.visual_html || "",
+    schemaType: row.schema_type || "FAQPage",
+    schemaJson: row.schema_json || {},
+    embedCode: row.embed_code || "",
+    widgetPayload: row.widget_payload || {},
+    intentSummary: row.intent_summary || [],
+    providerStatus: row.provider_status || [],
+    profileSnapshot: row.profile_snapshot || {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
