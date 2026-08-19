@@ -103,3 +103,20 @@ ALTER TABLE audit_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE schema_patches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE monitor_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE monitor_alerts ENABLE ROW LEVEL SECURITY;
+
+GRANT SELECT, INSERT, UPDATE ON monitor_configs TO aeo_local_app;
+GRANT SELECT, INSERT, UPDATE ON monitor_alerts TO aeo_local_app;
+
+CREATE POLICY aeo_local_app_monitor_configs_access
+  ON monitor_configs
+  FOR ALL
+  TO aeo_local_app
+  USING (true)
+  WITH CHECK (true);
+
+CREATE POLICY aeo_local_app_monitor_alerts_access
+  ON monitor_alerts
+  FOR ALL
+  TO aeo_local_app
+  USING (true)
+  WITH CHECK (true);
