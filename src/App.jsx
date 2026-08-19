@@ -160,6 +160,42 @@ function normalizeWebsiteInput(value) {
   return raw;
 }
 
+function normalizeAuditKeyValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\/+$/, "")
+    .replace(/\s+/g, " ");
+}
+
+function buildAuditInputKey({
+  profile,
+  selectedBusinessType,
+  competitors,
+  monitoredLocations,
+}) {
+  const fields = [
+    "name",
+    "website",
+    "address",
+    "market",
+    "services",
+    "category",
+    "hours",
+  ];
+  return JSON.stringify({
+    selectedBusinessType,
+    profile: fields.reduce((summary, key) => {
+      summary[key] = normalizeAuditKeyValue(profile?.[key]);
+      return summary;
+    }, {}),
+    competitors: (competitors || []).map(normalizeAuditKeyValue).filter(Boolean),
+    monitoredLocations: (monitoredLocations || [])
+      .map(normalizeAuditKeyValue)
+      .filter(Boolean),
+  });
+}
+
 function App() {
   const [workspace, setWorkspace] = useState(getInitialWorkspace);
   const [activeTab, setActiveTab] = useState("audit");
@@ -222,7 +258,21 @@ function App() {
       sourceCompletion,
     ]
   );
-  const auditReport = serverAuditReport || simulatedAuditReport;
+  const currentAuditInputKey = useMemo(
+    () =>
+      buildAuditInputKey({
+        profile,
+        selectedBusinessType,
+        competitors,
+        monitoredLocations,
+      }),
+    [profile, selectedBusinessType, competitors, monitoredLocations]
+  );
+  const serverAuditMatchesCurrentInput =
+    serverAuditReport?.auditInputKey === currentAuditInputKey;
+  const auditReport = serverAuditMatchesCurrentInput
+    ? serverAuditReport
+    : simulatedAuditReport;
 
   useEffect(() => {
     function syncRoute() {
@@ -372,6 +422,8 @@ function App() {
 
   async function runAudit() {
     if (auditState === "running") return;
+    const requestAuditInputKey = currentAuditInputKey;
+    const payload = buildServerPayload();
     setAuditState("running");
     setAuditMode("server-running");
     setServerAuditReport(null);
@@ -381,16 +433,7 @@ function App() {
       const response = await fetch("/api/audit", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          profile,
-          businessId,
-          businessType: businessTypes.find(
-            (type) => type.id === selectedBusinessType
-          ),
-          competitors,
-          monitoredLocations,
-          sourceCompletion,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -402,7 +445,10 @@ function App() {
         throw new Error("Audit endpoint returned an empty payload");
       }
 
-      setServerAuditReport(data.audit);
+      setServerAuditReport({
+        ...data.audit,
+        auditInputKey: requestAuditInputKey,
+      });
       setAuditMode(data.audit.mode || data.mode || "server");
       setAuditNotice(getAuditModeNotice(data.audit.mode || data.mode));
       if (data.persistence) setPersistenceStatus(data.persistence);
@@ -550,6 +596,7 @@ function App() {
 
   async function runContinuousMonitor() {
     if (monitorState === "running") return;
+    const requestAuditInputKey = currentAuditInputKey;
     setMonitorState("running");
     setMonitorNotice("");
 
@@ -571,7 +618,10 @@ function App() {
         throw new Error(data.detail || data.error);
       }
 
-      setServerAuditReport(data.audit);
+      setServerAuditReport({
+        ...data.audit,
+        auditInputKey: requestAuditInputKey,
+      });
       setAuditMode(data.audit?.mode || "server");
       setAuditNotice(getAuditModeNotice(data.audit?.mode));
       setMonitorConfig({ ...defaultMonitorConfig, ...(data.config || {}) });
