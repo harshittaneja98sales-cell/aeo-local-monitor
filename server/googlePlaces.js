@@ -198,9 +198,7 @@ async function runTextSearch({ apiKey, textQuery, pageSize, env }) {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(
-      `Google Places HTTP ${response.status}: ${truncateText(detail, 500)}`
-    );
+    throw new Error(buildGooglePlacesErrorMessage(response.status, detail));
   }
 
   const data = await response.json();
@@ -222,9 +220,7 @@ async function runPlaceDetails({ apiKey, placeId, env }) {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(
-      `Google Place Details HTTP ${response.status}: ${truncateText(detail, 500)}`
-    );
+    throw new Error(buildGooglePlacesErrorMessage(response.status, detail));
   }
 
   return response.json();
@@ -599,6 +595,38 @@ function getHostname(value) {
 function truncateText(value, maxLength) {
   const text = String(value || "");
   return text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`;
+}
+
+function buildGooglePlacesErrorMessage(status, detail) {
+  const providerMessage = parseGoogleErrorMessage(detail);
+
+  if (
+    status === 403 &&
+    /has not been used|disabled|permission_denied|api has not been used/i.test(
+      providerMessage
+    )
+  ) {
+    return "Google Places API key is present, but Places API (New) is disabled for the Google Cloud project. Enable Places API (New), wait a few minutes, then retry.";
+  }
+
+  if (status === 403) {
+    return "Google Places rejected the request. Check that the API key allows server requests to Places API (New).";
+  }
+
+  if (status === 400 && /fieldmask|field mask/i.test(providerMessage)) {
+    return "Google Places rejected the requested field mask. Update the Places field list before retrying.";
+  }
+
+  return `Google Places HTTP ${status}: ${truncateText(providerMessage, 220)}`;
+}
+
+function parseGoogleErrorMessage(detail) {
+  try {
+    const parsed = JSON.parse(detail);
+    return parsed?.error?.message || parsed?.error || detail;
+  } catch {
+    return detail;
+  }
 }
 
 function parseIntegerEnv(value, fallback, min, max) {
