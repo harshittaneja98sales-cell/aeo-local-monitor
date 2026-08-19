@@ -129,9 +129,15 @@ function calculateSourceCompletion(profile, competitors, monitoredLocations) {
   return Math.round(profileScore + competitorScore + locationScore);
 }
 
+function getInitialRoute() {
+  if (typeof window === "undefined") return "landing";
+  return window.location.hash === "#app" ? "app" : "landing";
+}
+
 function App() {
   const [workspace, setWorkspace] = useState(getInitialWorkspace);
   const [activeTab, setActiveTab] = useState("audit");
+  const [route, setRoute] = useState(getInitialRoute);
   const [scanState, setScanState] = useState("idle");
   const [auditState, setAuditState] = useState("ready");
   const [serverAuditReport, setServerAuditReport] = useState(null);
@@ -186,6 +192,16 @@ function App() {
     ]
   );
   const auditReport = serverAuditReport || simulatedAuditReport;
+
+  useEffect(() => {
+    function syncRoute() {
+      setRoute(window.location.hash === "#app" ? "app" : "landing");
+    }
+
+    syncRoute();
+    window.addEventListener("hashchange", syncRoute);
+    return () => window.removeEventListener("hashchange", syncRoute);
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem("aeo-local-workspace", JSON.stringify(workspace));
@@ -417,6 +433,60 @@ function App() {
     }
   }
 
+  function openProduct(tab = "audit", seed = {}) {
+    const businessInput = String(seed.businessInput || "").trim();
+    const marketInput = String(seed.marketInput || "").trim();
+
+    setActiveTab(tab);
+    if (businessInput || marketInput) {
+      resetAuditResult();
+      setWorkspace((current) => {
+        const nextProfile = { ...current.profile };
+
+        if (businessInput) {
+          const looksLikeWebsite =
+            /^https?:\/\//i.test(businessInput) ||
+            /^[^\s]+\.[^\s]+$/.test(businessInput);
+
+          if (looksLikeWebsite) {
+            nextProfile.website = /^https?:\/\//i.test(businessInput)
+              ? businessInput
+              : `https://${businessInput}`;
+          } else {
+            nextProfile.name = businessInput;
+          }
+        }
+
+        if (marketInput) {
+          nextProfile.market = marketInput;
+        }
+
+        return {
+          ...current,
+          businessId: null,
+          profile: nextProfile,
+        };
+      });
+    }
+
+    setRoute("app");
+    if (window.location.hash !== "#app") {
+      window.location.hash = "app";
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
+  function showLanding() {
+    setRoute("landing");
+    window.history.pushState("", document.title, window.location.pathname);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  if (route === "landing") {
+    return <LandingPage onOpenApp={openProduct} />;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -459,6 +529,10 @@ function App() {
             <h1>{profile.name}</h1>
           </div>
           <div className="topbar-actions">
+            <button className="secondary-button" onClick={showLanding}>
+              <Globe2 size={17} />
+              <span>Landing</span>
+            </button>
             <label className="type-select">
               <span>Business type</span>
               <select
@@ -573,6 +647,441 @@ function App() {
 
       <TaskDrawer task={selectedTask} onClose={() => setSelectedTask(null)} />
     </div>
+  );
+}
+
+function LandingPage({ onOpenApp }) {
+  const [businessInput, setBusinessInput] = useState("");
+  const [marketInput, setMarketInput] = useState("");
+
+  function submitAudit(event) {
+    event.preventDefault();
+    onOpenApp("audit", { businessInput, marketInput });
+  }
+
+  return (
+    <div className="landing-page">
+      <header className="landing-nav">
+        <button className="landing-brand" onClick={() => onOpenApp("audit")}>
+          <span className="brand-mark">
+            <Activity size={20} />
+          </span>
+          <span>
+            <strong>AEO Local</strong>
+            <small>Monitor</small>
+          </span>
+        </button>
+        <nav aria-label="Landing navigation">
+          <a href="#how-it-works">How it works</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#faq">FAQ</a>
+          <button className="secondary-button" onClick={() => onOpenApp("audit")}>
+            <Bot size={17} />
+            <span>Open demo</span>
+          </button>
+        </nav>
+      </header>
+
+      <main>
+        <section className="landing-hero">
+          <HeroProductVisual />
+          <div className="hero-scrim" />
+          <div className="landing-container hero-content">
+            <div className="hero-copy">
+              <span className="hero-badge">
+                New GEO monitoring for local businesses
+              </span>
+              <h1>AEO Local Monitor</h1>
+              <p>
+                Find out whether ChatGPT, Perplexity, Gemini, and Google AI
+                answers recommend your business or send ready-to-buy local
+                customers to competitors.
+              </p>
+              <div className="hero-actions">
+                <button
+                  className="primary-button hero-primary"
+                  onClick={() => onOpenApp("audit")}
+                >
+                  <Search size={18} />
+                  <span>Run local AI audit</span>
+                </button>
+                <button
+                  className="secondary-button hero-secondary"
+                  onClick={() => onOpenApp("schema")}
+                >
+                  <Code2 size={18} />
+                  <span>See 1-click schema fix</span>
+                </button>
+              </div>
+            </div>
+
+            <form className="hero-audit-box" onSubmit={submitAudit}>
+              <div>
+                <p className="eyebrow">Free instant scan</p>
+                <h2>Check your business AI visibility score</h2>
+              </div>
+              <label>
+                <span>Business name or website</span>
+                <input
+                  value={businessInput}
+                  onChange={(event) => setBusinessInput(event.target.value)}
+                  placeholder="choiceplumbingorlando.com"
+                />
+              </label>
+              <label>
+                <span>City / state</span>
+                <input
+                  value={marketInput}
+                  onChange={(event) => setMarketInput(event.target.value)}
+                  placeholder="Orlando, FL"
+                />
+              </label>
+              <button className="primary-button" type="submit">
+                <Zap size={18} />
+                <span>Run free discovery audit</span>
+              </button>
+              <small>
+                No credit card required. Tests high-intent local prompts and
+                opens the live product workspace.
+              </small>
+            </form>
+          </div>
+        </section>
+
+        <section className="landing-proof">
+          <div className="landing-container proof-grid">
+            <LandingStat value="4" label="AI answer engines simulated" />
+            <LandingStat value="1-click" label="JSON-LD schema generation" />
+            <LandingStat value="0 code" label="Copy, validate, and install flow" />
+            <LandingStat value="Saved" label="Audit history with Supabase" />
+          </div>
+        </section>
+
+        <section className="landing-section problem-section">
+          <div className="landing-container split-section">
+            <div>
+              <p className="eyebrow">The problem</p>
+              <h2>The way customers find local services has changed.</h2>
+              <p>
+                Local buyers now ask answer engines direct questions like
+                &quot;best emergency plumber near me open now&quot; or
+                &quot;which cosmetic dentist has same-day appointments?&quot;
+                They often trust the one or two businesses named in the answer.
+              </p>
+            </div>
+            <div className="problem-list">
+              <LandingFeature
+                icon={Search}
+                title="You may be invisible"
+                text="AI engines can skip a real business when the website lacks machine-readable local entity data."
+              />
+              <LandingFeature
+                icon={AlertTriangle}
+                title="Answers can be wrong"
+                text="Outdated hours, missing service pages, and weak citations can create hallucinated recommendations."
+              />
+              <LandingFeature
+                icon={ArrowUpRight}
+                title="Competitors get the call"
+                text="If another business is easier to parse and cite, the lead may never reach your website."
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-section" id="how-it-works">
+          <div className="landing-container">
+            <div className="section-heading">
+              <p className="eyebrow">How it works</p>
+              <h2>From invisible to AI-ready in three steps.</h2>
+            </div>
+            <div className="step-grid">
+              <LandingStep
+                number="01"
+                icon={Bot}
+                title="Run the AI visibility audit"
+                text="Simulate hyper-local buying prompts across ChatGPT-style search, Perplexity, Gemini, and Google AI Overview patterns."
+              />
+              <LandingStep
+                number="02"
+                icon={Code2}
+                title="Generate the entity schema"
+                text="Create LocalBusiness JSON-LD with services, areas served, opening hours, sameAs links, FAQ blocks, and crawlable entity context."
+              />
+              <LandingStep
+                number="03"
+                icon={ListChecks}
+                title="Save every run and fix"
+                text="Track audit history, schema patches, competitor mentions, citations, and remediation tasks in one workspace."
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-section product-section">
+          <div className="landing-container split-section product-split">
+            <div>
+              <p className="eyebrow">Built for paid local SaaS</p>
+              <h2>Give owners a clear reason to pay: show the gap, then fix it.</h2>
+              <p>
+                The product is designed around a direct before-and-after
+                workflow: audit their AI visibility, identify why the business
+                is missing, generate a schema patch, and keep monitoring for
+                competitor movement.
+              </p>
+              <div className="feature-list">
+                <span>
+                  <CheckCircle2 size={17} /> AI share-of-voice scoring
+                </span>
+                <span>
+                  <CheckCircle2 size={17} /> Direct citation tracking
+                </span>
+                <span>
+                  <CheckCircle2 size={17} /> Entity gap detection
+                </span>
+                <span>
+                  <CheckCircle2 size={17} /> Saved audit and patch history
+                </span>
+              </div>
+            </div>
+            <div className="comparison-panel">
+              <div className="comparison-row comparison-head">
+                <strong>Capability</strong>
+                <strong>Traditional SEO</strong>
+                <strong>AEO Local</strong>
+              </div>
+              <ComparisonRow label="Tracks AI answers" oldValue="No" newValue="Yes" />
+              <ComparisonRow label="Detects hallucinations" oldValue="Manual" newValue="Automated" />
+              <ComparisonRow label="Builds LocalBusiness schema" oldValue="Developer" newValue="1-click" />
+              <ComparisonRow label="Shows competitors recommended instead" oldValue="Limited" newValue="Included" />
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-section pricing-section" id="pricing">
+          <div className="landing-container">
+            <div className="section-heading">
+              <p className="eyebrow">Pricing</p>
+              <h2>Simple plans for local businesses and agencies.</h2>
+            </div>
+            <div className="pricing-grid">
+              <PricingCard
+                name="Starter"
+                price="$49"
+                description="For one local business location."
+                features={[
+                  "Weekly AI visibility audit",
+                  "1-click JSON-LD generator",
+                  "Citation and mention score",
+                  "Email support",
+                ]}
+                onClick={() => onOpenApp("audit")}
+              />
+              <PricingCard
+                name="Growth"
+                price="$99"
+                description="For high-value local services and clinics."
+                badge="Most popular"
+                features={[
+                  "Daily prompt simulation",
+                  "Up to 3 locations",
+                  "Competitor incursion tracking",
+                  "Schema patch history",
+                ]}
+                onClick={() => onOpenApp("audit")}
+              />
+              <PricingCard
+                name="Agency"
+                price="$249"
+                description="For agencies and multi-location operators."
+                features={[
+                  "Up to 10 locations",
+                  "White-label report workflow",
+                  "Team dashboard",
+                  "Priority support",
+                ]}
+                onClick={() => onOpenApp("audit")}
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-section faq-section" id="faq">
+          <div className="landing-container faq-grid">
+            <div>
+              <p className="eyebrow">FAQ</p>
+              <h2>Questions local owners ask before they try it.</h2>
+            </div>
+            <div className="faq-list">
+              <FaqItem
+                question="Does this replace Google Business Profile or SEO?"
+                answer="No. It strengthens them by making your business easier for AI engines to parse, cite, and compare against local competitors."
+              />
+              <FaqItem
+                question="Do customers need a developer?"
+                answer="No. The schema generator creates a copy-ready JSON-LD block with installation steps for common website platforms."
+              />
+              <FaqItem
+                question="Is the product live?"
+                answer="Yes. The app is deployed on Vercel with saved audit runs and schema patch storage connected through Supabase."
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-final">
+          <div className="landing-container final-cta">
+            <div>
+              <p className="eyebrow">Start with the audit</p>
+              <h2>Do not let AI answers send your best local leads elsewhere.</h2>
+              <p>
+                Run the live workspace, check the gaps, then generate the first
+                entity schema fix.
+              </p>
+            </div>
+            <button className="primary-button" onClick={() => onOpenApp("audit")}>
+              <Search size={18} />
+              <span>Run my AI audit now</span>
+            </button>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function HeroProductVisual() {
+  const rows = [
+    ["ChatGPT", "Mentioned", "82%"],
+    ["Perplexity", "Cited", "76%"],
+    ["Gemini", "Gap found", "51%"],
+    ["Google AI", "Competitor", "44%"],
+  ];
+
+  return (
+    <div className="hero-product-stage" aria-hidden="true">
+      <div className="hero-dashboard-shot">
+        <div className="shot-sidebar">
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+        <div className="shot-main">
+          <div className="shot-top">
+            <span />
+            <span />
+          </div>
+          <div className="shot-score-row">
+            <div>
+              <strong>AI Share of Voice</strong>
+              <b>68%</b>
+            </div>
+            <div>
+              <strong>Direct Citations</strong>
+              <b>41%</b>
+            </div>
+            <div>
+              <strong>Entity Baseline</strong>
+              <b>72%</b>
+            </div>
+          </div>
+          <div className="shot-matrix">
+            {rows.map(([engine, status, width]) => (
+              <div className="shot-row" key={engine}>
+                <span>{engine}</span>
+                <small>{status}</small>
+                <i style={{ "--bar": width }} />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="shot-drawer">
+          <span>Schema fix</span>
+          <strong>LocalBusiness JSON-LD</strong>
+          <small>Ready to copy</small>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LandingStat({ value, label }) {
+  return (
+    <div className="landing-stat">
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function LandingFeature({ icon: Icon, title, text }) {
+  return (
+    <article className="landing-feature">
+      <Icon size={20} />
+      <div>
+        <h3>{title}</h3>
+        <p>{text}</p>
+      </div>
+    </article>
+  );
+}
+
+function LandingStep({ number, icon: Icon, title, text }) {
+  return (
+    <article className="landing-step">
+      <div className="step-topline">
+        <span>{number}</span>
+        <Icon size={22} />
+      </div>
+      <h3>{title}</h3>
+      <p>{text}</p>
+    </article>
+  );
+}
+
+function ComparisonRow({ label, oldValue, newValue }) {
+  return (
+    <div className="comparison-row">
+      <span>{label}</span>
+      <span>{oldValue}</span>
+      <strong>{newValue}</strong>
+    </div>
+  );
+}
+
+function PricingCard({ name, price, description, features, badge, onClick }) {
+  return (
+    <article className={badge ? "pricing-card featured" : "pricing-card"}>
+      {badge && <span className="pricing-badge">{badge}</span>}
+      <h3>{name}</h3>
+      <p>{description}</p>
+      <div className="price-line">
+        <strong>{price}</strong>
+        <span>/ month</span>
+      </div>
+      <ul>
+        {features.map((feature) => (
+          <li key={feature}>
+            <CheckCircle2 size={16} />
+            <span>{feature}</span>
+          </li>
+        ))}
+      </ul>
+      <button className="primary-button" onClick={onClick}>
+        <Play size={17} />
+        <span>Start 7-day trial</span>
+      </button>
+    </article>
+  );
+}
+
+function FaqItem({ question, answer }) {
+  return (
+    <article className="faq-item">
+      <h3>{question}</h3>
+      <p>{answer}</p>
+    </article>
   );
 }
 
