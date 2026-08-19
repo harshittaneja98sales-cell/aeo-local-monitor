@@ -491,6 +491,12 @@ function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function openRemediationForTask(task) {
+    setActiveTab(isSchemaRemediationTask(task) ? "schema" : "remediation");
+    setSelectedTask(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   if (route === "landing") {
     return <LandingPage onOpenApp={openProduct} />;
   }
@@ -653,7 +659,11 @@ function App() {
         )}
       </main>
 
-      <TaskDrawer task={selectedTask} onClose={() => setSelectedTask(null)} />
+      <TaskDrawer
+        task={selectedTask}
+        onClose={() => setSelectedTask(null)}
+        onOpenRemediation={openRemediationForTask}
+      />
     </div>
   );
 }
@@ -2322,8 +2332,11 @@ function SettingsPanel({
   );
 }
 
-function TaskDrawer({ task, onClose }) {
+function TaskDrawer({ task, onClose, onOpenRemediation }) {
   if (!task) return null;
+  const actionLabel = isSchemaRemediationTask(task)
+    ? "Open schema fix"
+    : "Open fix queue";
 
   return (
     <aside className="drawer" aria-label="Remediation detail">
@@ -2365,11 +2378,30 @@ function TaskDrawer({ task, onClose }) {
           </div>
         ))}
       </div>
-      <button className="primary-button drawer-button">
+      <button
+        className="primary-button drawer-button"
+        onClick={() => onOpenRemediation(task)}
+      >
         <ArrowUpRight size={17} />
-        <span>Open remediation</span>
+        <span>{actionLabel}</span>
       </button>
     </aside>
+  );
+}
+
+function isSchemaRemediationTask(task) {
+  const haystack = [
+    task?.id,
+    task?.title,
+    task?.source,
+    task?.details,
+    ...(task?.actions || []),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return /schema|json-ld|localbusiness|openinghours|structured data|markup|faq/.test(
+    haystack
   );
 }
 
