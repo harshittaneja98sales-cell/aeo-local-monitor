@@ -128,6 +128,9 @@ function App() {
   const [activeTab, setActiveTab] = useState("audit");
   const [scanState, setScanState] = useState("idle");
   const [auditState, setAuditState] = useState("ready");
+  const [serverAuditReport, setServerAuditReport] = useState(null);
+  const [auditMode, setAuditMode] = useState("local-simulation");
+  const [auditNotice, setAuditNotice] = useState("");
   const [selectedTask, setSelectedTask] = useState(
     businessTemplates[workspace.selectedBusinessType].remediationTasks[0]
   );
@@ -148,7 +151,7 @@ function App() {
     () => calculateSourceCompletion(profile, competitors, monitoredLocations),
     [profile, competitors, monitoredLocations]
   );
-  const auditReport = useMemo(
+  const simulatedAuditReport = useMemo(
     () =>
       runLocalAiAudit({
         profile,
@@ -167,12 +170,14 @@ function App() {
       sourceCompletion,
     ]
   );
+  const auditReport = serverAuditReport || simulatedAuditReport;
 
   useEffect(() => {
     window.localStorage.setItem("aeo-local-workspace", JSON.stringify(workspace));
   }, [workspace]);
 
   function setProfile(nextProfile) {
+    resetAuditResult();
     setWorkspace((current) => ({
       ...current,
       profile:
@@ -183,6 +188,7 @@ function App() {
   }
 
   function setCompetitors(nextCompetitors) {
+    resetAuditResult();
     setWorkspace((current) => ({
       ...current,
       competitors:
@@ -193,6 +199,7 @@ function App() {
   }
 
   function setMonitoredLocations(nextLocations) {
+    resetAuditResult();
     setWorkspace((current) => ({
       ...current,
       monitoredLocations:
@@ -205,6 +212,7 @@ function App() {
   function changeBusinessType(typeId) {
     const nextTemplate = businessTemplates[typeId];
     const nextType = businessTypes.find((type) => type.id === typeId);
+    resetAuditResult();
     setWorkspace({
       selectedBusinessType: typeId,
       profile: nextTemplate.business,
@@ -220,16 +228,60 @@ function App() {
     setAuditState("ready");
   }
 
+  function resetAuditResult() {
+    setServerAuditReport(null);
+    setAuditMode("local-simulation");
+    setAuditNotice("");
+    setAuditState((current) => (current === "running" ? current : "ready"));
+  }
+
   function runScan() {
     if (scanState === "running") return;
     setScanState("running");
     window.setTimeout(() => setScanState("complete"), 1400);
   }
 
-  function runAudit() {
+  async function runAudit() {
     if (auditState === "running") return;
     setAuditState("running");
-    window.setTimeout(() => setAuditState("complete"), 1200);
+    setServerAuditReport(null);
+    setAuditNotice("");
+
+    try {
+      const response = await fetch("/api/audit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profile,
+          businessType: businessTypes.find(
+            (type) => type.id === selectedBusinessType
+          ),
+          competitors,
+          monitoredLocations,
+          sourceCompletion,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Audit endpoint returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!data.audit) {
+        throw new Error("Audit endpoint returned an empty payload");
+      }
+
+      setServerAuditReport(data.audit);
+      setAuditMode(data.audit.mode || data.mode || "server");
+      setAuditNotice(getAuditModeNotice(data.audit.mode || data.mode));
+    } catch {
+      setAuditMode("local-simulation");
+      setAuditNotice(
+        "Live audit endpoint is unavailable on this static preview, so this run is using local simulation."
+      );
+    } finally {
+      setAuditState("complete");
+    }
   }
 
   return (
@@ -329,6 +381,8 @@ function App() {
             onBusinessTypeChange={changeBusinessType}
             auditReport={auditReport}
             auditState={auditState}
+            auditMode={auditMode}
+            auditNotice={auditNotice}
             sourceCompletion={sourceCompletion}
             onRunAudit={runAudit}
           />
@@ -457,6 +511,29 @@ function Overview({
   );
 }
 
+function getAuditModeLabel(mode) {
+  if (mode === "openai-web-search") return "Live OpenAI";
+  if (mode === "server-crawler-simulation") return "Crawler + simulator";
+  return "Local simulator";
+}
+
+function getAuditModeNotice(mode) {
+  if (mode === "openai-web-search") {
+    return "ChatGPT with Search rows are using live OpenAI web-search output; the remaining providers are still modeled.";
+  }
+  if (mode === "server-crawler-simulation") {
+    return "The server crawled the brand website, but OPENAI_API_KEY is not configured, so provider answers are simulated.";
+  }
+  return "This preview is using deterministic local simulation data.";
+}
+
+function getWebsiteScanLabel(scan) {
+  if (!scan) return "Not run";
+  if (scan.status === "scanned") return `${scan.pagesScanned} pages scanned`;
+  if (scan.status === "failed") return "Crawl failed";
+  return "Website missing";
+}
+
 function AiAudit({
   profile,
   setProfile,
@@ -465,6 +542,8 @@ function AiAudit({
   onBusinessTypeChange,
   auditReport,
   auditState,
+  auditMode,
+  auditNotice,
   sourceCompletion,
   onRunAudit,
 }) {
@@ -475,10 +554,14 @@ function AiAudit({
     inputWarnings,
     entityGaps,
     competitorShare,
+    websiteScan,
+    providerStatus = [],
   } = auditReport;
   const visibleResults = results.slice(0, 12);
   const completed = auditState === "complete";
   const running = auditState === "running";
+  const visibleAuditMode = auditReport.mode || auditMode;
+  const modeNotice = auditNotice || getAuditModeNotice(visibleAuditMode);
 
   return (
     <div className="audit-workspace">
@@ -489,7 +572,11 @@ function AiAudit({
             <h2>Automated AI Search Audit</h2>
           </div>
           <span className="status-chip">
-            {running ? "Running" : completed ? "Complete" : "Ready"}
+            {running
+              ? "Running"
+              : completed
+                ? getAuditModeLabel(visibleAuditMode)
+                : "Ready"}
           </span>
         </div>
 
@@ -550,10 +637,33 @@ function AiAudit({
 
           <button className="primary-button audit-run-button" onClick={onRunAudit}>
             {running ? <RefreshCw className="spin" size={17} /> : <Search size={17} />}
-            <span>{running ? "Simulating queries" : "Run AI search audit"}</span>
+            <span>{running ? "Running audit" : "Run AI search audit"}</span>
           </button>
         </div>
       </section>
+
+      {(completed || running) && (
+        <section className="audit-status-strip">
+          <article className="audit-status-card">
+            <Globe2 size={16} />
+            <div>
+              <strong>{getAuditModeLabel(visibleAuditMode)}</strong>
+              <span>{running ? "Calling audit endpoint..." : modeNotice}</span>
+            </div>
+          </article>
+          {providerStatus.map((provider) => (
+            <article className="audit-status-card" key={provider.provider}>
+              <CheckCircle2 size={16} />
+              <div>
+                <strong>{provider.provider}</strong>
+                <span>
+                  {provider.status.replace("_", " ")}: {provider.detail}
+                </span>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
 
       {inputWarnings.length > 0 && (
         <section className="audit-warning-strip">
@@ -566,6 +676,36 @@ function AiAudit({
               </div>
             </article>
           ))}
+        </section>
+      )}
+
+      {websiteScan && (
+        <section className="panel website-scan-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Owned website crawl</p>
+              <h2>{getWebsiteScanLabel(websiteScan)}</h2>
+            </div>
+            <Globe2 size={19} />
+          </div>
+          <div className="website-scan-grid">
+            <ScanCheck label="LocalBusiness schema" done={websiteScan.hasLocalBusinessSchema} />
+            <ScanCheck label="Opening hours schema" done={websiteScan.hasOpeningHoursSchema} />
+            <ScanCheck label="Geo coordinates" done={websiteScan.hasGeoSchema} />
+            <ScanCheck label="FAQ schema" done={websiteScan.hasFAQSchema} />
+            <ScanCheck label="Phone signal" done={websiteScan.hasPhone} />
+            <ScanCheck
+              label="Service terms"
+              done={(websiteScan.detectedServices || []).length > 0}
+            />
+          </div>
+          {websiteScan.notes?.length > 0 && (
+            <div className="scan-notes">
+              {websiteScan.notes.map((note) => (
+                <span key={note}>{note}</span>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -717,6 +857,15 @@ function AiAudit({
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function ScanCheck({ label, done }) {
+  return (
+    <div className={done ? "scan-check good" : "scan-check missing"}>
+      {done ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+      <span>{label}</span>
     </div>
   );
 }

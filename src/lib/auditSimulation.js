@@ -65,12 +65,14 @@ export function runLocalAiAudit({
   );
 
   return {
+    mode: "local-simulation",
     prompts,
     inputWarnings,
     entityGaps,
     results,
-    summary: summarizeResults(results),
-    competitorShare: summarizeCompetitors(results),
+    summary: summarizeAuditResults(results),
+    competitorShare: summarizeCompetitorShare(results),
+    websiteScan: null,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -311,7 +313,7 @@ function simulateEngineResult({
   };
 }
 
-function summarizeResults(results) {
+export function summarizeAuditResults(results) {
   const total = results.length;
   const mentions = results.filter((result) => result.mentioned).length;
   const citations = results.filter((result) => result.cited).length;
@@ -339,7 +341,7 @@ function summarizeResults(results) {
   };
 }
 
-function summarizeCompetitors(results) {
+export function summarizeCompetitorShare(results) {
   const counts = results
     .flatMap((result) => result.competitorRecommendations)
     .reduce((summary, competitor) => {

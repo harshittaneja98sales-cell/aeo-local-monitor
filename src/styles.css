@@ -339,6 +339,39 @@ button {
   gap: 10px;
 }
 
+.audit-status-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.audit-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f0f9ff;
+  color: #075985;
+  padding: 10px 12px;
+}
+
+.audit-status-card svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.audit-status-card strong,
+.audit-status-card span {
+  display: block;
+}
+
+.audit-status-card span {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 .audit-warning {
   display: flex;
   align-items: flex-start;
@@ -392,6 +425,55 @@ button {
   color: var(--muted);
   margin-top: 4px;
   line-height: 1.35;
+}
+
+.website-scan-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.website-scan-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.scan-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.scan-check.good {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.scan-check.missing {
+  color: #9f1239;
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.scan-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scan-notes span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 5px 8px;
 }
 
 .prompt-card-grid {
@@ -1211,6 +1293,8 @@ dd {
   .metric-row,
   .audit-metrics,
   .audit-warning-strip,
+  .audit-status-strip,
+  .website-scan-grid,
   .graph-grid,
   .detail-grid,
   .prompt-card-grid,
