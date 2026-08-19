@@ -162,6 +162,51 @@ function normalizeWebsiteInput(value) {
   return raw;
 }
 
+function inferBusinessNameFromWebsite(value) {
+  const raw = normalizeWebsiteInput(value);
+  if (!raw) return "";
+
+  try {
+    const host = new URL(raw).hostname
+      .replace(/^www\./i, "")
+      .split(".")[0]
+      .replace(/[-_]+/g, " ")
+      .trim();
+
+    return host
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  } catch {
+    return "";
+  }
+}
+
+function buildWebsiteOnlyAuditProfile(profile, website, businessType) {
+  const inferredName = inferBusinessNameFromWebsite(website);
+
+  return {
+    ...profile,
+    name: inferredName || profile.name || "Website business",
+    businessType: businessType?.label || profile.businessType || "",
+    category: businessType?.categoryTerm || profile.category || "",
+    market: "",
+    website,
+    phone: "",
+    address: "",
+    hours: "",
+    serviceArea: "",
+    services:
+      businessType?.highIntentService ||
+      businessType?.categoryTerm ||
+      profile.services ||
+      "",
+    credential: "",
+    bookingUrl: website,
+  };
+}
+
 function normalizeAuditKeyValue(value) {
   return String(value || "")
     .trim()
@@ -461,10 +506,22 @@ function App() {
     window.setTimeout(() => setScanState("complete"), 1400);
   }
 
-  async function runAudit() {
+  async function runAudit(options = {}) {
     if (auditState === "running") return;
-    const requestAuditInputKey = currentAuditInputKey;
-    const payload = buildServerPayload();
+    const overrideProfile =
+      options?.profile && typeof options.profile === "object"
+        ? options.profile
+        : profile;
+    const requestAuditInputKey = buildAuditInputKey({
+      profile: overrideProfile,
+      selectedBusinessType,
+      competitors,
+      monitoredLocations,
+    });
+    const payload = buildServerPayload(
+      { smartInputMode: options?.smartInputMode || "" },
+      { profile: overrideProfile }
+    );
     const controller = new AbortController();
     const timeout = window.setTimeout(
       () => controller.abort(),
@@ -614,10 +671,13 @@ function App() {
 
       setAnswerHub(data.answerHub);
       if (data.persistence) setPersistenceStatus(data.persistence);
-      if (data.business?.id) {
+      if (data.business?.id || data.audit.profileSnapshot) {
         setWorkspace((current) => ({
           ...current,
-          businessId: data.business.id,
+          businessId: data.business?.id || current.businessId,
+          profile: data.audit.profileSnapshot
+            ? { ...current.profile, ...data.audit.profileSnapshot }
+            : current.profile,
         }));
       }
       setAnswerHubNotice(
@@ -737,9 +797,14 @@ function App() {
     }
   }
 
-  function buildServerPayload(extra = {}) {
+  function buildServerPayload(extra = {}, overrides = {}) {
+    const payloadProfile =
+      overrides.profile && typeof overrides.profile === "object"
+        ? overrides.profile
+        : profile;
+
     return {
-      profile,
+      profile: payloadProfile,
       businessId,
       businessType: businessTypes.find(
         (type) => type.id === selectedBusinessType
@@ -2595,9 +2660,16 @@ function AiAudit({
     websiteScan,
     providerStatus = [],
   } = auditReport;
+  const [smartWebsite, setSmartWebsite] = useState(profile.website || "");
   const visibleResults = results.slice(0, 12);
   const completed = auditState === "complete";
   const running = auditState === "running";
+  const selectedType = businessTypes.find(
+    (type) => type.id === selectedBusinessType
+  );
+  const normalizedWebsite = normalizeWebsiteInput(smartWebsite);
+  const canRunInstantAudit =
+    Boolean(normalizedWebsite) && normalizedWebsite.includes(".");
   const visibleAuditMode = running ? auditMode : auditReport.mode || auditMode;
   const modeNotice = auditNotice || getAuditModeNotice(visibleAuditMode);
   const liveRows = results.filter(isLiveProviderResult).length;
@@ -2610,6 +2682,32 @@ function AiAudit({
   ]
     .filter(Boolean)
     .join(" · ");
+
+  useEffect(() => {
+    setSmartWebsite(profile.website || "");
+  }, [profile.website]);
+
+  function runInstantAudit() {
+    if (!canRunInstantAudit || running) return;
+
+    const currentWebsite = normalizeAuditKeyValue(
+      normalizeWebsiteInput(profile.website)
+    );
+    const nextWebsite = normalizeAuditKeyValue(normalizedWebsite);
+    const websiteChanged = currentWebsite !== nextWebsite;
+    const nextProfile = websiteChanged
+      ? buildWebsiteOnlyAuditProfile(profile, normalizedWebsite, selectedType)
+      : { ...profile, website: normalizedWebsite };
+
+    if (websiteChanged || normalizedWebsite !== profile.website) {
+      setProfile(nextProfile);
+    }
+
+    onRunAudit({
+      profile: nextProfile,
+      smartInputMode: "website-only",
+    });
+  }
 
   return (
     <div className="audit-workspace">
@@ -2628,106 +2726,44 @@ function AiAudit({
           </span>
         </div>
 
-        <div className="audit-setup">
-          <label className="type-select wide-control">
-            <span>Business type</span>
-            <select
-              value={selectedBusinessType}
-              onChange={(event) => onBusinessTypeChange(event.target.value)}
-            >
-              {businessTypes.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            <span>Business</span>
-            <input
-              value={profile.name || ""}
-              placeholder="RapidFlow Plumbing"
-              onChange={(event) =>
-                setProfile({ ...profile, name: event.target.value })
-              }
-            />
-          </label>
-          <label className="website-field">
-            <span>Brand website</span>
+        <div className="instant-audit-setup">
+          <label className="smart-website-field">
+            <span>Enter business website</span>
             <input
               type="url"
               inputMode="url"
               autoComplete="url"
               spellCheck="false"
-              value={profile.website || ""}
-              placeholder="https://choiceplumbingorlando.com"
+              value={smartWebsite}
+              placeholder="https://example.com"
               onBlur={(event) => {
                 const website = normalizeWebsiteInput(event.target.value);
-                if (website !== profile.website) {
-                  setProfile({ ...profile, website });
+                setSmartWebsite(website);
+              }}
+              onChange={(event) => setSmartWebsite(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  runInstantAudit();
                 }
               }}
-              onChange={(event) =>
-                setProfile({ ...profile, website: event.target.value })
-              }
             />
           </label>
-          <label className="address-field">
-            <span>Address</span>
-            <input
-              value={profile.address || ""}
-              placeholder="2147 S Lamar Blvd"
-              onChange={(event) =>
-                setProfile({ ...profile, address: event.target.value })
-              }
-            />
-          </label>
-          <label>
-            <span>Market</span>
-            <input
-              value={profile.market || ""}
-              placeholder="Austin, TX"
-              onChange={(event) =>
-                setProfile({ ...profile, market: event.target.value })
-              }
-            />
-          </label>
-
-          <div className="audit-setup-actions">
-            <button
-              className={`secondary-button places-lookup-button ${
-                placesState === "running" ? "is-loading" : ""
-              }`}
-              onClick={onRunPlacesLookup}
-              disabled={placesState === "running"}
-              aria-busy={placesState === "running"}
-            >
-              {placesState === "running" ? (
-                <RefreshCw className="spin" size={17} />
-              ) : (
-                <MapPin size={17} />
-              )}
-              <span>
-                {placesState === "running" ? "Finding place" : "Find on Google"}
-              </span>
-            </button>
-            <button
-              className={`primary-button audit-run-button ${
-                running ? "is-loading" : ""
-              }`}
-              onClick={onRunAudit}
-              disabled={running}
-              aria-busy={running}
-            >
-              {running ? (
-                <RefreshCw className="spin" size={17} />
-              ) : (
-                <Search size={17} />
-              )}
-              <span>{running ? "Running audit" : "Run AI search audit"}</span>
-            </button>
-          </div>
+          <button
+            className={`primary-button audit-run-button instant-audit-button ${
+              running ? "is-loading" : ""
+            }`}
+            onClick={runInstantAudit}
+            disabled={running || !canRunInstantAudit}
+            aria-busy={running}
+          >
+            {running ? (
+              <RefreshCw className="spin" size={17} />
+            ) : (
+              <Search size={17} />
+            )}
+            <span>{running ? "Running audit" : "Run instant AI audit"}</span>
+          </button>
         </div>
       </section>
 

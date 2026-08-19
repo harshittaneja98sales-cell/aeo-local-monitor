@@ -1479,7 +1479,55 @@ button {
 
 .audit-control {
   display: grid;
-  gap: 10px;
+  gap: 16px;
+}
+
+.instant-audit-setup {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.smart-website-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.smart-website-field span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.smart-website-field input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 50px;
+  min-width: 0;
+  width: 100%;
+  padding: 12px 14px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.smart-website-field input:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+  outline: 0;
+}
+
+.instant-audit-button {
+  min-height: 50px;
+  min-width: 236px;
+}
+
+.instant-audit-button:disabled:not(.is-loading) {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .audit-setup {
@@ -3041,6 +3089,7 @@ dd {
   }
 
   .audit-setup,
+  .instant-audit-setup,
   .audit-input-grid {
     grid-template-columns: 1fr;
   }

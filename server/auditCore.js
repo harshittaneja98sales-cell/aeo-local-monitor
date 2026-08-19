@@ -17,9 +17,13 @@ const FETCH_TIMEOUT_MS = 9000;
 const OPENROUTER_PROMPT_TIMEOUT_MS = 12000;
 
 export async function runServerAudit(payload = {}, env = process.env) {
-  const request = normalizeAuditPayload(payload);
-  const simulatedAudit = runLocalAiAudit(request);
+  let request = normalizeAuditPayload(payload);
   const websiteScan = await crawlWebsite(request.profile.website, request);
+  request = enrichRequestFromWebsite(request, websiteScan);
+  const simulatedAudit = {
+    ...runLocalAiAudit(request),
+    profileSnapshot: request.profile,
+  };
   const openRouterApiKey = getOpenRouterApiKey(env);
   const openAiApiKey = getOpenAiApiKey(env);
   const entityGaps = mergeEntityGaps(
@@ -210,6 +214,7 @@ function normalizeAuditPayload(payload) {
     sourceCompletion: Number.isFinite(payload.sourceCompletion)
       ? payload.sourceCompletion
       : 0,
+    smartInputMode: payload.smartInputMode || "",
   };
 }
 
@@ -345,12 +350,20 @@ function analyzeWebsitePages(pages, startUrl, request) {
       jsonLd: $('script[type="application/ld+json"]')
         .map((_, element) => $(element).html() || "")
         .get()
-        .join("\n"),
+        .join("\n/* AEO_JSON_LD_BLOCK */\n"),
       text: $("body").text().replace(/\s+/g, " ").trim().slice(0, 50000),
     };
   });
-  const combinedJsonLd = pageSummaries.map((page) => page.jsonLd).join("\n");
+  const combinedJsonLd = pageSummaries
+    .map((page) => page.jsonLd)
+    .join("\n/* AEO_JSON_LD_BLOCK */\n");
   const combinedText = pageSummaries.map((page) => page.text).join(" ").toLowerCase();
+  const extractedProfile = extractWebsiteProfile({
+    pageSummaries,
+    combinedJsonLd,
+    combinedText,
+    startUrl,
+  });
   const serviceTerms = splitCsv(request.profile.services);
   const detectedServices = serviceTerms.filter((service) =>
     combinedText.includes(service.toLowerCase())
@@ -380,6 +393,7 @@ function analyzeWebsitePages(pages, startUrl, request) {
     hasSameAs: /"sameAs"/i.test(combinedJsonLd),
     hasPhone,
     detectedServices,
+    extractedProfile,
     notes: buildWebsiteScanNotes({
       pagesScanned: pages.length,
       detectedServices,
@@ -396,6 +410,309 @@ function buildWebsiteScanNotes({ pagesScanned, detectedServices, serviceTerms })
     );
   }
   return notes;
+}
+
+function enrichRequestFromWebsite(request, websiteScan) {
+  if (websiteScan.status !== "scanned") return request;
+
+  const extracted = websiteScan.extractedProfile || {};
+  const websiteOnly = request.smartInputMode === "website-only";
+  const profile = request.profile || {};
+  const nextProfile = {
+    ...profile,
+    website: websiteScan.url || profile.website,
+  };
+  const fillableFields = [
+    "name",
+    "phone",
+    "address",
+    "hours",
+    "market",
+    "serviceArea",
+    "bookingUrl",
+  ];
+
+  for (const field of fillableFields) {
+    if (extracted[field] && (websiteOnly || !String(nextProfile[field] || "").trim())) {
+      nextProfile[field] = extracted[field];
+    }
+  }
+
+  if (extracted.services && (websiteOnly || !String(nextProfile.services || "").trim())) {
+    nextProfile.services = extracted.services;
+  }
+
+  if (!String(nextProfile.name || "").trim()) {
+    nextProfile.name = inferNameFromUrl(nextProfile.website);
+  }
+
+  return {
+    ...request,
+    profile: nextProfile,
+    sourceCompletion: Math.max(
+      request.sourceCompletion || 0,
+      calculateServerSourceCompletion({
+        profile: nextProfile,
+        competitors: request.competitors,
+        monitoredLocations: request.monitoredLocations,
+      })
+    ),
+  };
+}
+
+function extractWebsiteProfile({ pageSummaries, combinedJsonLd, combinedText, startUrl }) {
+  const structured = extractStructuredBusinessProfile(combinedJsonLd);
+  const homepage = pageSummaries[0] || {};
+  const titleName = cleanTitleForBusiness(homepage.title);
+  const phone = structured.phone || extractPhoneFromText(combinedText);
+  const address = structured.address || extractAddressFromText(combinedText);
+  const market =
+    structured.market ||
+    extractMarketFromAddress(address) ||
+    extractMarketFromText(combinedText);
+  const services = extractServicesFromMetadata(homepage, combinedText);
+
+  return removeEmptyValues({
+    name: structured.name || titleName || inferNameFromUrl(startUrl),
+    phone,
+    address,
+    market,
+    hours: structured.hours,
+    serviceArea: structured.serviceArea || market,
+    services,
+    bookingUrl: structured.bookingUrl || startUrl,
+  });
+}
+
+function extractStructuredBusinessProfile(jsonLd) {
+  const items = parseJsonLdItems(jsonLd);
+  const business = items.find((item) => {
+    const type = Array.isArray(item["@type"]) ? item["@type"].join(" ") : item["@type"];
+    return /LocalBusiness|Organization|Dentist|Plumber|Restaurant|Store|AutomotiveBusiness|AutoDealer|LegalService|HairSalon|HVACBusiness/i.test(
+      String(type || "")
+    );
+  });
+
+  if (!business) return {};
+
+  const address = formatStructuredAddress(business.address);
+  const market = extractMarketFromStructuredAddress(business.address);
+
+  return removeEmptyValues({
+    name: stringValue(business.name),
+    phone: stringValue(business.telephone),
+    address,
+    market,
+    hours: formatStructuredHours(
+      business.openingHoursSpecification || business.openingHours
+    ),
+    serviceArea: formatAreaServed(business.areaServed),
+    bookingUrl:
+      stringValue(business.url) ||
+      stringValue(business.sameAs) ||
+      stringValue(business["@id"]),
+  });
+}
+
+function parseJsonLdItems(jsonLd) {
+  const blocks = String(jsonLd || "")
+    .split("/* AEO_JSON_LD_BLOCK */")
+    .map((block) => block.trim())
+    .filter(Boolean);
+  const parsedItems = [];
+
+  for (const block of blocks) {
+    try {
+      collectJsonLdItems(JSON.parse(block), parsedItems);
+    } catch {
+      // Invalid third-party JSON-LD should not fail the website audit.
+    }
+  }
+
+  return parsedItems;
+}
+
+function collectJsonLdItems(value, target) {
+  if (!value) return;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectJsonLdItems(item, target));
+    return;
+  }
+  if (typeof value !== "object") return;
+  target.push(value);
+  if (Array.isArray(value["@graph"])) {
+    value["@graph"].forEach((item) => collectJsonLdItems(item, target));
+  }
+}
+
+function formatStructuredAddress(address) {
+  if (!address) return "";
+  if (typeof address === "string") return address;
+  if (Array.isArray(address)) return formatStructuredAddress(address[0]);
+
+  return [
+    address.streetAddress,
+    address.addressLocality,
+    address.addressRegion,
+    address.postalCode,
+  ]
+    .map(stringValue)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function extractMarketFromStructuredAddress(address) {
+  if (!address || typeof address !== "object" || Array.isArray(address)) return "";
+  return [address.addressLocality, address.addressRegion]
+    .map(stringValue)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function formatStructuredHours(hours) {
+  if (!hours) return "";
+  if (typeof hours === "string") return hours;
+  if (Array.isArray(hours)) {
+    return hours
+      .map((item) => {
+        if (typeof item === "string") return item;
+        const days = Array.isArray(item.dayOfWeek)
+          ? item.dayOfWeek.map((day) => String(day).split("/").pop()).join(", ")
+          : String(item.dayOfWeek || "").split("/").pop();
+        const opens = item.opens || "";
+        const closes = item.closes || "";
+        return [days, opens && closes ? `${opens}-${closes}` : ""]
+          .filter(Boolean)
+          .join(" ");
+      })
+      .filter(Boolean)
+      .join("; ");
+  }
+  return "";
+}
+
+function formatAreaServed(areaServed) {
+  if (!areaServed) return "";
+  if (typeof areaServed === "string") return areaServed;
+  if (Array.isArray(areaServed)) {
+    return areaServed
+      .map((area) => stringValue(area?.name || area))
+      .filter(Boolean)
+      .join(", ");
+  }
+  return stringValue(areaServed.name);
+}
+
+function cleanTitleForBusiness(title) {
+  return String(title || "")
+    .split(/\s[-|–—]\s/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .sort((left, right) => left.length - right.length)[0] || "";
+}
+
+function extractPhoneFromText(text) {
+  return String(text || "").match(/\(?\b\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/)?.[0] || "";
+}
+
+function extractAddressFromText(text) {
+  const match = String(text || "").match(
+    /\b\d{2,6}\s+[a-z0-9.' -]+(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|way|court|ct|circle|cir|parkway|pkwy)\b[^.|\n]{0,90}\b[a-z .'-]+,\s*[a-z]{2}\s*\d{0,5}/i
+  );
+  return match ? normalizeWhitespace(match[0]) : "";
+}
+
+function extractMarketFromAddress(address) {
+  const match = String(address || "").match(/([A-Za-z .'-]+),\s*([A-Z]{2})\b/i);
+  return match ? `${titleCase(match[1].trim())}, ${match[2].toUpperCase()}` : "";
+}
+
+function extractMarketFromText(text) {
+  const match = String(text || "").match(/\b([A-Z][a-z .'-]+),\s*([A-Z]{2})\b/i);
+  return match ? `${titleCase(match[1].trim())}, ${match[2].toUpperCase()}` : "";
+}
+
+function extractServicesFromMetadata(homepage, text) {
+  const source = `${homepage.title || ""} ${homepage.metaDescription || ""} ${String(
+    text || ""
+  ).slice(0, 2000)}`;
+  const serviceWords = [
+    "plumbing",
+    "water heater",
+    "drain cleaning",
+    "dentist",
+    "dental",
+    "emergency dental",
+    "used cars",
+    "auto sales",
+    "financing",
+    "hvac",
+    "ac repair",
+    "restaurant",
+    "reservations",
+    "hair salon",
+    "personal injury",
+  ];
+
+  return serviceWords
+    .filter((service) => source.toLowerCase().includes(service))
+    .slice(0, 6)
+    .join(", ");
+}
+
+function calculateServerSourceCompletion({ profile, competitors, monitoredLocations }) {
+  const fields = [
+    "name",
+    "category",
+    "market",
+    "website",
+    "phone",
+    "address",
+    "hours",
+    "serviceArea",
+    "services",
+    "credential",
+    "bookingUrl",
+  ];
+  const completed = fields.filter((field) => String(profile[field] || "").trim()).length;
+  const profileScore = (completed / fields.length) * 78;
+  const competitorScore = competitors.filter(Boolean).length >= 2 ? 12 : 0;
+  const locationScore = monitoredLocations.filter(Boolean).length >= 1 ? 10 : 0;
+
+  return Math.round(profileScore + competitorScore + locationScore);
+}
+
+function inferNameFromUrl(value) {
+  try {
+    const host = new URL(normalizeUrl(value)).hostname.replace(/^www\./, "");
+    return host
+      .split(".")[0]
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  } catch {
+    return "";
+  }
+}
+
+function removeEmptyValues(values) {
+  return Object.entries(values).reduce((summary, [key, value]) => {
+    if (String(value || "").trim()) summary[key] = normalizeWhitespace(value);
+    return summary;
+  }, {});
+}
+
+function stringValue(value) {
+  if (Array.isArray(value)) return stringValue(value[0]);
+  if (value && typeof value === "object") return stringValue(value.name || value["@id"]);
+  return String(value || "").trim();
+}
+
+function normalizeWhitespace(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function titleCase(value) {
+  return String(value || "").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }
 
 function buildWebsiteScanGaps(scan) {

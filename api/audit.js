@@ -61,11 +61,15 @@ export default async function handler(req, res) {
 }
 
 async function saveAuditHistory(body, audit) {
-  const business = await upsertBusinessFromAudit(body);
+  const request = {
+    ...body,
+    profile: audit.profileSnapshot || body.profile,
+  };
+  const business = await upsertBusinessFromAudit(request);
   const auditRun = await saveAuditRun({
     businessId: business.id,
     audit,
-    request: { ...body, businessId: business.id },
+    request: { ...request, businessId: business.id },
   });
 
   return { business, auditRun };
