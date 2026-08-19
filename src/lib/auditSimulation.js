@@ -444,8 +444,11 @@ function cleanPromptLocation(value) {
   const location = String(value || "")
     .replace(/\s+/g, " ")
     .trim();
+  const county = cleanCountyPromptLocation(location);
   const rejected =
-    /\b(?:believe|core values|customer wants|highest quality|ready to work|same day|skilled technicians)\b/i;
+    /\b(?:believe|cleaning|core values|customer wants|drain|highest quality|plumber|plumbing|ready to work|repair|same day|service|services|skilled technicians|water heater)\b/i;
+
+  if (county) return county;
 
   if (!location || location === "your market") return "";
   if (location.length > 48 || /[.!?]/.test(location) || rejected.test(location)) {
@@ -453,6 +456,54 @@ function cleanPromptLocation(value) {
   }
 
   return location;
+}
+
+function cleanCountyPromptLocation(value) {
+  const countyMatches = [
+    ...String(value || "").matchAll(
+      /\b([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,7}\s+County)\b/g
+    ),
+  ];
+  const rejectedWords = new Set([
+    "Best",
+    "Cleaning",
+    "County",
+    "Drain",
+    "Emergency",
+    "Heater",
+    "Local",
+    "Near",
+    "Plumber",
+    "Plumbing",
+    "Repair",
+    "Service",
+    "Services",
+    "Top",
+    "Water",
+  ]);
+
+  for (const match of countyMatches) {
+    const words = match[1]
+      .split(/\s+/)
+      .map((word) => word.replace(/[^A-Za-z'-]/g, ""))
+      .filter(Boolean);
+
+    for (let index = 0; index < words.length; index += 1) {
+      const candidateWords = words.slice(index);
+      const endsWithCounty = candidateWords[candidateWords.length - 1] === "County";
+      const lengthLooksRight =
+        candidateWords.length >= 2 && candidateWords.length <= 4;
+      const containsServiceWord = candidateWords
+        .slice(0, -1)
+        .some((word) => rejectedWords.has(word));
+
+      if (endsWithCounty && lengthLooksRight && !containsServiceWord) {
+        return candidateWords.join(" ");
+      }
+    }
+  }
+
+  return "";
 }
 
 function cleanBusinessName(name) {

@@ -653,10 +653,8 @@ function extractMarketFromText(text) {
     if (market) return market;
   }
 
-  const countyMatch = source.match(
-    /\b([A-Z][A-Za-z .'-]{1,36}\s+County)\s+(?:plumber|plumbing|dentist|dental|restaurant|lawyer|attorney|hvac|salon|auto|cars|dealer|dealership)\b/
-  );
-  if (countyMatch) return titleCase(countyMatch[1].trim());
+  const county = extractCountyLocation(source);
+  if (county) return county;
 
   return "";
 }
@@ -739,6 +737,8 @@ function stringValue(value) {
 function formatMarket(city, state) {
   const stateCode = String(state || "").trim().toUpperCase();
   if (!isUsStateCode(stateCode)) return "";
+  const county = cleanCountyLocation(city);
+  if (county) return county;
   const cityName = titleCase(
     String(city || "")
       .replace(/\b(?:serving|serves|service area|located in|based in|near|in)\b/gi, "")
@@ -752,7 +752,7 @@ function isCleanMarket(value) {
   const market = String(value || "").trim();
   const [city = "", state = ""] = market.split(",").map((part) => part.trim());
   const rejectedWords =
-    /\b(?:about|blog|call|contact|core|customer|fast|home|hours|quality|reliable|review|same|service|values|work)\b/i;
+    /\b(?:about|blog|call|cleaning|contact|core|customer|drain|emergency|fast|heater|home|hours|plumber|plumbing|quality|reliable|repair|review|same|service|services|values|water|work)\b/i;
 
   return (
     city.length >= 3 &&
@@ -762,6 +762,60 @@ function isCleanMarket(value) {
     !rejectedWords.test(city) &&
     isUsStateCode(state)
   );
+}
+
+function extractCountyLocation(text) {
+  const countyMatches = [
+    ...normalizeWhitespace(text).matchAll(
+      /\b([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,7}\s+County)\b/g
+    ),
+  ];
+
+  return (
+    countyMatches
+      .map((match) => cleanCountyLocation(match[1]))
+      .find(Boolean) || ""
+  );
+}
+
+function cleanCountyLocation(value) {
+  const words = titleCase(value)
+    .split(/\s+/)
+    .map((word) => word.replace(/[^A-Za-z'-]/g, ""))
+    .filter(Boolean);
+  const rejectedWords = new Set([
+    "Best",
+    "Cleaning",
+    "County",
+    "Drain",
+    "Emergency",
+    "Heater",
+    "Local",
+    "Near",
+    "Plumber",
+    "Plumbing",
+    "Repair",
+    "Service",
+    "Services",
+    "Top",
+    "Water",
+  ]);
+
+  for (let index = 0; index < words.length; index += 1) {
+    const candidateWords = words.slice(index);
+    const endsWithCounty = candidateWords[candidateWords.length - 1] === "County";
+    const lengthLooksRight =
+      candidateWords.length >= 2 && candidateWords.length <= 4;
+    const containsServiceWord = candidateWords
+      .slice(0, -1)
+      .some((word) => rejectedWords.has(word));
+
+    if (endsWithCounty && lengthLooksRight && !containsServiceWord) {
+      return candidateWords.join(" ");
+    }
+  }
+
+  return "";
 }
 
 function isUsStateCode(value) {
