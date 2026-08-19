@@ -6,5 +6,11 @@
       "source": "/((?!api/.*).*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/monitor",
+      "schedule": "0 6 * * 1"
+    }
   ]
 }

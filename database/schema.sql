@@ -50,12 +50,56 @@ CREATE TABLE IF NOT EXISTS schema_patches (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS monitor_configs (
+  id TEXT PRIMARY KEY,
+  business_id TEXT UNIQUE NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  frequency TEXT NOT NULL DEFAULT 'weekly',
+  alert_email TEXT,
+  watch_hallucinations BOOLEAN NOT NULL DEFAULT true,
+  watch_citations BOOLEAN NOT NULL DEFAULT true,
+  watch_competitors BOOLEAN NOT NULL DEFAULT true,
+  last_run_at TIMESTAMPTZ,
+  next_run_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS monitor_alerts (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  audit_run_id TEXT REFERENCES audit_runs(id) ON DELETE SET NULL,
+  type TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  prompt TEXT,
+  provider TEXT,
+  source_url TEXT,
+  competitor TEXT,
+  fingerprint TEXT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (business_id, fingerprint)
+);
+
 CREATE INDEX IF NOT EXISTS businesses_updated_at_idx ON businesses (updated_at DESC);
 CREATE INDEX IF NOT EXISTS audit_runs_business_created_idx
   ON audit_runs (business_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS schema_patches_business_created_idx
   ON schema_patches (business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS monitor_configs_next_run_idx
+  ON monitor_configs (enabled, next_run_at);
+CREATE INDEX IF NOT EXISTS monitor_alerts_business_created_idx
+  ON monitor_alerts (business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS monitor_alerts_business_status_idx
+  ON monitor_alerts (business_id, status);
 
 ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE schema_patches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE monitor_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE monitor_alerts ENABLE ROW LEVEL SECURITY;

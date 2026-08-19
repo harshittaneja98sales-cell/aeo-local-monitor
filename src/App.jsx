@@ -45,6 +45,7 @@ import { generateEntitySchemaPatch } from "./lib/schemaGenerator.js";
 const tabs = [
   ["audit", "AI Audit", Bot],
   ["schema", "Schema Fix", Code2],
+  ["monitoring", "Monitor", ShieldCheck],
   ["onboarding", "Onboarding", ClipboardList],
   ["overview", "Overview", CircleGauge],
   ["prompts", "Prompts", Search],
@@ -76,6 +77,23 @@ const profileFields = [
 ];
 
 const requiredProfileFields = profileFields.map(([key]) => key);
+
+const defaultMonitorConfig = {
+  enabled: true,
+  frequency: "weekly",
+  alertEmail: "",
+  watchHallucinations: true,
+  watchCitations: true,
+  watchCompetitors: true,
+};
+
+const defaultMonitorSummary = {
+  total: 0,
+  high: 0,
+  hallucinations: 0,
+  citations: 0,
+  competitors: 0,
+};
 
 function getInitialWorkspace() {
   const fallbackType = "plumbing";
@@ -155,6 +173,11 @@ function App() {
   const [schemaState, setSchemaState] = useState("ready");
   const [schemaNotice, setSchemaNotice] = useState("");
   const [savedAuditRuns, setSavedAuditRuns] = useState([]);
+  const [monitorConfig, setMonitorConfig] = useState(defaultMonitorConfig);
+  const [monitorAlerts, setMonitorAlerts] = useState([]);
+  const [monitorSummary, setMonitorSummary] = useState(defaultMonitorSummary);
+  const [monitorState, setMonitorState] = useState("ready");
+  const [monitorNotice, setMonitorNotice] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState({
     mode: "unknown",
     detail: "Run an audit after connecting DATABASE_URL to save history.",
@@ -239,6 +262,38 @@ function App() {
           detail:
             "Audit history is not available on this preview until DATABASE_URL is configured.",
         });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId) {
+      setMonitorAlerts([]);
+      setMonitorSummary(defaultMonitorSummary);
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/monitor?businessId=${encodeURIComponent(businessId)}`)
+      .then((response) => {
+        if (!response.ok) throw new Error("Monitor endpoint failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setMonitorConfig({ ...defaultMonitorConfig, ...(data.config || {}) });
+        setMonitorAlerts(data.alerts || []);
+        setMonitorSummary(data.summary || defaultMonitorSummary);
+        if (data.persistence) setPersistenceStatus(data.persistence);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMonitorNotice(
+          "Monitor alerts are not available until the database is connected."
+        );
       });
 
     return () => {
@@ -441,6 +496,116 @@ function App() {
     }
   }
 
+  function buildServerPayload(extra = {}) {
+    return {
+      profile,
+      businessId,
+      businessType: businessTypes.find(
+        (type) => type.id === selectedBusinessType
+      ),
+      selectedBusinessType,
+      competitors,
+      monitoredLocations,
+      sourceCompletion,
+      ...extra,
+    };
+  }
+
+  async function saveMonitorConfig(nextConfig = monitorConfig) {
+    setMonitorState("saving");
+    setMonitorNotice("");
+
+    try {
+      const response = await fetch("/api/monitor", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(buildServerPayload({ config: nextConfig })),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Monitor endpoint returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      setMonitorConfig({ ...defaultMonitorConfig, ...(data.config || {}) });
+      setMonitorAlerts(data.alerts || []);
+      setMonitorSummary(data.summary || defaultMonitorSummary);
+      if (data.persistence) setPersistenceStatus(data.persistence);
+      if (data.business?.id) {
+        setWorkspace((current) => ({
+          ...current,
+          businessId: data.business.id,
+        }));
+      }
+      setMonitorNotice("Monitoring settings saved.");
+    } catch {
+      setMonitorNotice("Monitoring settings could not be saved.");
+    } finally {
+      setMonitorState("ready");
+    }
+  }
+
+  async function runContinuousMonitor() {
+    if (monitorState === "running") return;
+    setMonitorState("running");
+    setMonitorNotice("");
+
+    try {
+      const response = await fetch("/api/monitor-run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          buildServerPayload({ monitorConfig, monitorRun: true })
+        ),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Monitor run returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.detail || data.error);
+      }
+
+      setServerAuditReport(data.audit);
+      setAuditMode(data.audit?.mode || "server");
+      setAuditNotice(getAuditModeNotice(data.audit?.mode));
+      setMonitorConfig({ ...defaultMonitorConfig, ...(data.config || {}) });
+      setMonitorAlerts(data.alerts || []);
+      setMonitorSummary(data.summary || defaultMonitorSummary);
+      if (data.persistence) setPersistenceStatus(data.persistence);
+      if (data.business?.id) {
+        setWorkspace((current) => ({
+          ...current,
+          businessId: data.business.id,
+        }));
+      }
+      if (data.auditRun) {
+        setSavedAuditRuns((current) =>
+          [
+            data.auditRun,
+            ...current.filter((run) => run.id !== data.auditRun.id),
+          ].slice(0, 10)
+        );
+      }
+      setAuditState("complete");
+      setMonitorNotice(
+        data.alerts?.length
+          ? `${data.alerts.length} monitoring alert${data.alerts.length === 1 ? "" : "s"} detected.`
+          : "Monitoring run complete. No active alerts detected."
+      );
+    } catch (error) {
+      setMonitorNotice(
+        error instanceof Error
+          ? error.message
+          : "Monitoring run could not be completed."
+      );
+    } finally {
+      setMonitorState("ready");
+    }
+  }
+
   function openProduct(tab = "audit", seed = {}) {
     const businessInput = String(seed.businessInput || "").trim();
     const marketInput = String(seed.marketInput || "").trim();
@@ -623,6 +788,23 @@ function App() {
             schemaNotice={schemaNotice}
             persistenceStatus={persistenceStatus}
             onGenerateSchema={runSchemaGenerator}
+          />
+        )}
+        {activeTab === "monitoring" && (
+          <ContinuousMonitor
+            profile={profile}
+            businessId={businessId}
+            monitorConfig={monitorConfig}
+            setMonitorConfig={setMonitorConfig}
+            monitorAlerts={monitorAlerts}
+            monitorSummary={monitorSummary}
+            monitorState={monitorState}
+            monitorNotice={monitorNotice}
+            persistenceStatus={persistenceStatus}
+            auditMode={auditReport.mode || auditMode}
+            providerStatus={auditReport.providerStatus || []}
+            onSaveConfig={saveMonitorConfig}
+            onRunMonitor={runContinuousMonitor}
           />
         )}
         {activeTab === "onboarding" && (
@@ -1189,18 +1371,26 @@ function Overview({
 }
 
 function getAuditModeLabel(mode) {
+  if (mode === "openrouter-web-search") return "Live OpenRouter";
   if (mode === "openai-web-search") return "Live OpenAI";
   if (mode === "openai-error-fallback") return "OpenAI fallback";
+  if (mode === "live-provider-error-fallback") return "Provider fallback";
   if (mode === "server-crawler-simulation") return "Crawler + simulator";
   return "Local simulator";
 }
 
 function getAuditModeNotice(mode) {
+  if (mode === "openrouter-web-search") {
+    return "ChatGPT-style rows are using live OpenRouter web-search output; the remaining providers are still modeled.";
+  }
   if (mode === "openai-web-search") {
     return "ChatGPT with Search rows are using live OpenAI web-search output; the remaining providers are still modeled.";
   }
+  if (mode === "live-provider-error-fallback") {
+    return "A live provider was configured, but the request failed, so this run used fallback scoring.";
+  }
   if (mode === "server-crawler-simulation") {
-    return "The server crawled the brand website, but OPENAI_API_KEY is not configured, so provider answers are simulated.";
+    return "The server crawled the brand website, but no live provider key is configured, so provider answers are simulated.";
   }
   if (mode === "openai-error-fallback") {
     return "OpenAI is configured, but the provider request failed, so this run used fallback scoring.";
@@ -1208,11 +1398,304 @@ function getAuditModeNotice(mode) {
   return "This preview is using deterministic local simulation data.";
 }
 
+function getMonitorAlertTypeLabel(type) {
+  const labels = {
+    citation_gap: "Citation gap",
+    third_party_citation: "Citation drift",
+    hallucinated_phone: "Wrong phone",
+    hallucinated_hours: "Wrong hours",
+    hours_source_gap: "Hours risk",
+    competitor_incursion: "Competitor",
+    competitor_overtake: "Overtake",
+    competitor_share_jump: "Share jump",
+    rank_drop: "Rank drop",
+  };
+  return labels[type] || "Monitor alert";
+}
+
+function formatDateTime(value) {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not available";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function getWebsiteScanLabel(scan) {
   if (!scan) return "Not run";
   if (scan.status === "scanned") return `${scan.pagesScanned} pages scanned`;
   if (scan.status === "failed") return "Crawl failed";
   return "Website missing";
+}
+
+function ContinuousMonitor({
+  profile,
+  businessId,
+  monitorConfig,
+  setMonitorConfig,
+  monitorAlerts,
+  monitorSummary,
+  monitorState,
+  monitorNotice,
+  persistenceStatus,
+  auditMode,
+  providerStatus,
+  onSaveConfig,
+  onRunMonitor,
+}) {
+  const running = monitorState === "running";
+  const saving = monitorState === "saving";
+  const lastRun = monitorConfig.lastRunAt
+    ? formatDateTime(monitorConfig.lastRunAt)
+    : "Not run yet";
+  const nextRun = monitorConfig.nextRunAt
+    ? formatDateTime(monitorConfig.nextRunAt)
+    : "After first monitor run";
+
+  function updateConfig(patch) {
+    setMonitorConfig((current) => ({ ...current, ...patch }));
+  }
+
+  return (
+    <div className="monitor-workspace">
+      <section className="panel monitor-control">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Feature 3</p>
+            <h2>Continuous AI Hallucination & Citation Monitoring</h2>
+          </div>
+          <span
+            className={
+              monitorConfig.enabled
+                ? "status-chip database-ready"
+                : "status-chip"
+            }
+          >
+            {monitorConfig.enabled ? "Monitoring on" : "Paused"}
+          </span>
+        </div>
+
+        <div className="monitor-action-row">
+          <div className="monitor-context">
+            <InfoPill icon={Building2} label={profile.name || "Business"} />
+            <InfoPill icon={Clock3} label={`Last run: ${lastRun}`} />
+            <InfoPill icon={RefreshCw} label={`Next: ${nextRun}`} />
+            <InfoPill icon={ShieldCheck} label={getAuditModeLabel(auditMode)} />
+          </div>
+          <div className="schema-button-row">
+            <button
+              className="secondary-button"
+              onClick={() => onSaveConfig(monitorConfig)}
+              disabled={saving || running}
+            >
+              {saving ? <RefreshCw className="spin" size={16} /> : <CheckCircle2 size={16} />}
+              <span>{saving ? "Saving" : "Save settings"}</span>
+            </button>
+            <button
+              className="primary-button"
+              onClick={onRunMonitor}
+              disabled={running}
+            >
+              {running ? <RefreshCw className="spin" size={17} /> : <Play size={17} />}
+              <span>{running ? "Running monitor" : "Run monitor now"}</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="monitor-config-grid">
+          <label>
+            <span>Schedule</span>
+            <select
+              value={monitorConfig.frequency}
+              onChange={(event) => updateConfig({ frequency: event.target.value })}
+            >
+              <option value="weekly">Weekly</option>
+              <option value="daily">Daily</option>
+            </select>
+          </label>
+          <label>
+            <span>Alert email</span>
+            <input
+              value={monitorConfig.alertEmail || ""}
+              placeholder="owner@example.com"
+              onChange={(event) => updateConfig({ alertEmail: event.target.value })}
+            />
+          </label>
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={monitorConfig.enabled}
+              onChange={(event) => updateConfig({ enabled: event.target.checked })}
+            />
+            <span>Enable automated re-scans</span>
+          </label>
+        </div>
+
+        <div className="monitor-watch-grid">
+          <MonitorToggle
+            label="Hallucination alerts"
+            checked={monitorConfig.watchHallucinations}
+            onChange={(checked) => updateConfig({ watchHallucinations: checked })}
+          />
+          <MonitorToggle
+            label="Citation loss alerts"
+            checked={monitorConfig.watchCitations}
+            onChange={(checked) => updateConfig({ watchCitations: checked })}
+          />
+          <MonitorToggle
+            label="Competitor incursion alerts"
+            checked={monitorConfig.watchCompetitors}
+            onChange={(checked) => updateConfig({ watchCompetitors: checked })}
+          />
+        </div>
+      </section>
+
+      <section className="monitor-summary-grid">
+        <AuditMetric
+          label="Active alerts"
+          value={monitorSummary.total}
+          detail={businessId ? "Stored for this business" : "Run monitor to create business"}
+        />
+        <AuditMetric
+          label="Hallucinations"
+          value={monitorSummary.hallucinations}
+          detail="Wrong hours, phone, or source facts"
+        />
+        <AuditMetric
+          label="Citation issues"
+          value={monitorSummary.citations}
+          detail="Missing or third-party citations"
+        />
+        <AuditMetric
+          label="Competitor alerts"
+          value={monitorSummary.competitors}
+          detail="Overtakes and share jumps"
+        />
+      </section>
+
+      {monitorNotice && <p className="monitor-notice">{monitorNotice}</p>}
+
+      <section className="monitor-split">
+        <div className="panel monitor-alerts-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Alert inbox</p>
+              <h2>Hallucination, citation, and competitor alerts</h2>
+            </div>
+            <span className="status-chip">{monitorSummary.high} high</span>
+          </div>
+
+          <div className="monitor-alert-list">
+            {monitorAlerts.length === 0 ? (
+              <div className="empty-state">
+                <ShieldCheck size={22} />
+                <strong>No active alerts yet</strong>
+                <span>
+                  Run the monitor after an audit to start tracking changes.
+                </span>
+              </div>
+            ) : (
+              monitorAlerts.map((alert) => (
+                <article
+                  className={`monitor-alert-card ${alert.severity.toLowerCase()}`}
+                  key={alert.id || alert.fingerprint}
+                >
+                  <div>
+                    <span className={`severity ${alert.severity.toLowerCase()}`}>
+                      {alert.severity}
+                    </span>
+                    <span className="intent-chip">
+                      {getMonitorAlertTypeLabel(alert.type)}
+                    </span>
+                  </div>
+                  <h3>{alert.title}</h3>
+                  <p>{alert.detail}</p>
+                  <dl className="alert-meta-grid">
+                    <div>
+                      <dt>Provider</dt>
+                      <dd>{alert.provider || "Monitor"}</dd>
+                    </div>
+                    <div>
+                      <dt>Prompt</dt>
+                      <dd>{alert.prompt || "Prompt set"}</dd>
+                    </div>
+                    <div>
+                      <dt>Last seen</dt>
+                      <dd>{formatDateTime(alert.lastSeenAt || alert.createdAt)}</dd>
+                    </div>
+                  </dl>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Retention driver</p>
+              <h2>What the monitor watches</h2>
+            </div>
+            <ListChecks size={19} />
+          </div>
+          <div className="monitor-watch-list">
+            <ScanCheck
+              label="Weekly automated AI re-scans"
+              done={monitorConfig.enabled}
+            />
+            <ScanCheck
+              label="Incorrect hours, phone, or fact mentions"
+              done={monitorConfig.watchHallucinations}
+            />
+            <ScanCheck
+              label="Missing owned-source citations"
+              done={monitorConfig.watchCitations}
+            />
+            <ScanCheck
+              label="Competitor overtakes on local prompts"
+              done={monitorConfig.watchCompetitors}
+            />
+          </div>
+          <div className="provider-status-list">
+            {providerStatus.length === 0 ? (
+              <p className="quiet-status">
+                Run a monitor pass to capture provider status.
+              </p>
+            ) : (
+              providerStatus.map((provider) => (
+                <div className="provider-status-row" key={provider.provider}>
+                  <strong>{provider.provider}</strong>
+                  <span>{provider.status}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <p className="quiet-status">
+            {persistenceStatus.mode === "database"
+              ? "Alerts are saved to Supabase and reused between sessions."
+              : "Connect DATABASE_URL before alerts can be persisted."}
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MonitorToggle({ label, checked, onChange }) {
+  return (
+    <label className="toggle-row">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>{label}</span>
+    </label>
+  );
 }
 
 function SchemaFix({

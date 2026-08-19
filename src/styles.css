@@ -962,6 +962,218 @@ button {
   gap: 16px;
 }
 
+.monitor-workspace {
+  display: grid;
+  gap: 16px;
+}
+
+.monitor-control {
+  display: grid;
+  gap: 14px;
+}
+
+.monitor-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.monitor-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.monitor-config-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1fr) minmax(220px, 0.8fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.monitor-config-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.monitor-config-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.monitor-config-grid input:not([type="checkbox"]),
+.monitor-config-grid select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 40px;
+  min-width: 0;
+  width: 100%;
+  padding: 9px 10px;
+  background: #ffffff;
+  color: var(--text);
+}
+
+.monitor-watch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.toggle-row {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  padding: 9px 11px;
+}
+
+.toggle-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #0f766e;
+}
+
+.toggle-row span {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.monitor-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.monitor-notice {
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f0f9ff;
+  color: #075985;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.monitor-split {
+  display: grid;
+  grid-template-columns: minmax(430px, 1.2fr) minmax(300px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.monitor-alert-list,
+.monitor-watch-list,
+.provider-status-list {
+  display: grid;
+  gap: 10px;
+}
+
+.monitor-alert-card {
+  border: 1px solid var(--line);
+  border-left: 4px solid #2563eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.monitor-alert-card.high {
+  border-left-color: #be123c;
+}
+
+.monitor-alert-card.medium {
+  border-left-color: #b45309;
+}
+
+.monitor-alert-card.low {
+  border-left-color: #075985;
+}
+
+.monitor-alert-card > div:first-child {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.monitor-alert-card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.monitor-alert-card p {
+  color: #475569;
+  line-height: 1.45;
+  margin: 7px 0 12px;
+}
+
+.alert-meta-grid {
+  display: grid;
+  grid-template-columns: 0.7fr 1.4fr 0.7fr;
+  gap: 10px;
+  margin: 0;
+}
+
+.alert-meta-grid div {
+  border-top: 1px solid #edf1f5;
+  padding-top: 8px;
+  min-width: 0;
+}
+
+.alert-meta-grid dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.alert-meta-grid dd {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.empty-state {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  padding: 18px;
+}
+
+.empty-state strong {
+  color: var(--text);
+}
+
+.provider-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.provider-status-row span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
 .schema-control {
   display: grid;
   gap: 12px;
@@ -2154,6 +2366,7 @@ dd {
 
   .dashboard-grid,
   .audit-split,
+  .monitor-split,
   .schema-split,
   .onboarding-grid,
   .audit-grid,
@@ -2262,6 +2475,9 @@ dd {
 
   .metric-row,
   .audit-metrics,
+  .monitor-summary-grid,
+  .monitor-config-grid,
+  .monitor-watch-grid,
   .schema-summary-grid,
   .audit-warning-strip,
   .audit-status-strip,
@@ -2285,6 +2501,15 @@ dd {
   .schema-action-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .monitor-action-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .alert-meta-grid {
+    grid-template-columns: 1fr;
   }
 
   .schema-button-row {
