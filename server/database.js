@@ -229,7 +229,13 @@ async function ensureSchema(env) {
     throw new Error("DATABASE_URL is not configured.");
   }
   if (schemaReadyFor === databaseUrl) return;
-  await getPool(env).query(SCHEMA_SQL);
+  try {
+    await getPool(env).query(SCHEMA_SQL);
+  } catch (error) {
+    if (!isSchemaPermissionError(error)) {
+      throw error;
+    }
+  }
   schemaReadyFor = databaseUrl;
 }
 
@@ -297,6 +303,13 @@ function buildBusinessKey(profile) {
 
 function getDatabaseUrl(env) {
   return env.DATABASE_URL || env.POSTGRES_URL || "";
+}
+
+function isSchemaPermissionError(error) {
+  return (
+    error?.code === "42501" ||
+    String(error?.message || "").includes("permission denied for schema")
+  );
 }
 
 function shouldUseSsl(databaseUrl, env) {

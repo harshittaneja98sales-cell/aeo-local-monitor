@@ -37,3 +37,6 @@ CREATE TABLE IF NOT EXISTS audit_runs (
 CREATE INDEX IF NOT EXISTS businesses_updated_at_idx ON businesses (updated_at DESC);
 CREATE INDEX IF NOT EXISTS audit_runs_business_created_idx
   ON audit_runs (business_id, created_at DESC);
+
+ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_runs ENABLE ROW LEVEL SECURITY;
