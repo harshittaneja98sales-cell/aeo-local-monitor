@@ -10,6 +10,9 @@ import {
   CircleGauge,
   Clock3,
   ClipboardList,
+  Code2,
+  Copy,
+  Download,
   FileText,
   Globe2,
   ListChecks,
@@ -37,9 +40,11 @@ import {
   getStatusTone,
 } from "./lib/scoring.js";
 import { runLocalAiAudit } from "./lib/auditSimulation.js";
+import { generateEntitySchemaPatch } from "./lib/schemaGenerator.js";
 
 const tabs = [
   ["audit", "AI Audit", Bot],
+  ["schema", "Schema Fix", Code2],
   ["onboarding", "Onboarding", ClipboardList],
   ["overview", "Overview", CircleGauge],
   ["prompts", "Prompts", Search],
@@ -132,6 +137,9 @@ function App() {
   const [serverAuditReport, setServerAuditReport] = useState(null);
   const [auditMode, setAuditMode] = useState("local-simulation");
   const [auditNotice, setAuditNotice] = useState("");
+  const [schemaPatch, setSchemaPatch] = useState(null);
+  const [schemaState, setSchemaState] = useState("ready");
+  const [schemaNotice, setSchemaNotice] = useState("");
   const [savedAuditRuns, setSavedAuditRuns] = useState([]);
   const [persistenceStatus, setPersistenceStatus] = useState({
     mode: "unknown",
@@ -271,6 +279,9 @@ function App() {
     setServerAuditReport(null);
     setAuditMode("local-simulation");
     setAuditNotice("");
+    setSchemaPatch(null);
+    setSchemaState("ready");
+    setSchemaNotice("");
     setAuditState((current) => (current === "running" ? current : "ready"));
   }
 
@@ -341,6 +352,68 @@ function App() {
       });
     } finally {
       setAuditState("complete");
+    }
+  }
+
+  async function runSchemaGenerator() {
+    if (schemaState === "running") return;
+    setSchemaState("running");
+    setSchemaNotice("");
+
+    const businessType = businessTypes.find(
+      (type) => type.id === selectedBusinessType
+    );
+
+    try {
+      const response = await fetch("/api/schema", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profile,
+          businessId,
+          businessType,
+          competitors,
+          monitoredLocations,
+          sourceCompletion,
+          auditReport,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Schema endpoint returned HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!data.schemaPatch) {
+        throw new Error("Schema endpoint returned an empty payload");
+      }
+
+      setSchemaPatch(data.schemaPatch);
+      if (data.persistence) setPersistenceStatus(data.persistence);
+      if (data.business?.id) {
+        setWorkspace((current) => ({
+          ...current,
+          businessId: data.business.id,
+        }));
+      }
+      setSchemaNotice(
+        data.savedPatch
+          ? "Schema fix saved to the business record."
+          : "Schema fix generated. Connect the database to save patch history."
+      );
+    } catch {
+      setSchemaPatch(
+        generateEntitySchemaPatch({
+          profile,
+          businessType,
+          auditReport,
+        })
+      );
+      setSchemaNotice(
+        "Schema fix generated locally because the server endpoint is unavailable."
+      );
+    } finally {
+      setSchemaState("complete");
     }
   }
 
@@ -448,6 +521,20 @@ function App() {
             businessId={businessId}
             sourceCompletion={sourceCompletion}
             onRunAudit={runAudit}
+          />
+        )}
+        {activeTab === "schema" && (
+          <SchemaFix
+            profile={profile}
+            selectedBusinessType={selectedBusinessType}
+            businessTypes={businessTypes}
+            auditReport={auditReport}
+            auditState={auditState}
+            schemaPatch={schemaPatch}
+            schemaState={schemaState}
+            schemaNotice={schemaNotice}
+            persistenceStatus={persistenceStatus}
+            onGenerateSchema={runSchemaGenerator}
           />
         )}
         {activeTab === "onboarding" && (
@@ -595,6 +682,211 @@ function getWebsiteScanLabel(scan) {
   if (scan.status === "scanned") return `${scan.pagesScanned} pages scanned`;
   if (scan.status === "failed") return "Crawl failed";
   return "Website missing";
+}
+
+function SchemaFix({
+  profile,
+  selectedBusinessType,
+  businessTypes,
+  auditReport,
+  auditState,
+  schemaPatch,
+  schemaState,
+  schemaNotice,
+  persistenceStatus,
+  onGenerateSchema,
+}) {
+  const [copiedTarget, setCopiedTarget] = useState("");
+  const businessType = businessTypes.find(
+    (type) => type.id === selectedBusinessType
+  );
+  const generatedPatch =
+    schemaPatch ||
+    generateEntitySchemaPatch({
+      profile,
+      businessType,
+      auditReport,
+    });
+  const missingGaps = auditReport.entityGaps.filter((gap) =>
+    ["website-localbusiness-schema", "website-opening-hours-schema", "website-faq-schema", "services", "qa", "hours"].includes(
+      gap.id
+    )
+  );
+  const running = schemaState === "running";
+
+  async function copyText(label, value) {
+    if (!navigator.clipboard) return;
+    await navigator.clipboard.writeText(value);
+    setCopiedTarget(label);
+    window.setTimeout(() => setCopiedTarget(""), 1600);
+  }
+
+  function downloadSchema() {
+    const blob = new Blob(
+      [JSON.stringify(generatedPatch.schemaJson, null, 2)],
+      { type: "application/ld+json" }
+    );
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${slugForFile(profile.name || "local-business")}-schema.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className="schema-workspace">
+      <section className="panel schema-control">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Feature 2</p>
+            <h2>1-click JSON-LD & Entity Schema Generator</h2>
+          </div>
+          <span
+            className={
+              persistenceStatus.mode === "database"
+                ? "status-chip database-ready"
+                : "status-chip"
+            }
+          >
+            {persistenceStatus.mode === "database" ? "Saves enabled" : "Ready"}
+          </span>
+        </div>
+
+        <div className="schema-action-row">
+          <div className="schema-context">
+            <InfoPill icon={Building2} label={profile.name || "Business"} />
+            <InfoPill icon={Globe2} label={profile.website || "Website missing"} />
+            <InfoPill icon={MapPin} label={profile.market || "Market missing"} />
+            <InfoPill
+              icon={Code2}
+              label={`${generatedPatch.schemaType} JSON-LD`}
+            />
+          </div>
+          <button className="primary-button" onClick={onGenerateSchema}>
+            {running ? <RefreshCw className="spin" size={17} /> : <Code2 size={17} />}
+            <span>{running ? "Generating" : "Generate schema fix"}</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="schema-summary-grid">
+        <AuditMetric
+          label="Entity type"
+          value={generatedPatch.schemaType}
+          detail="Most specific local business type"
+        />
+        <AuditMetric
+          label="Fields covered"
+          value={`${generatedPatch.fieldCoverage.filter((field) => field.done).length}/${generatedPatch.fieldCoverage.length}`}
+          detail="Profile fields included in JSON-LD"
+        />
+        <AuditMetric
+          label="Audit gaps"
+          value={missingGaps.length}
+          detail={auditState === "complete" ? "Schema-related gaps detected" : "Run audit for live gaps"}
+        />
+        <AuditMetric
+          label="Install path"
+          value="No-code"
+          detail="Copy, download, or install through CMS settings"
+        />
+      </section>
+
+      {schemaNotice && <p className="schema-notice">{schemaNotice}</p>}
+
+      <section className="schema-split">
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Entity package</p>
+              <h2>Signals fixed</h2>
+            </div>
+            <ShieldCheck size={19} />
+          </div>
+          <div className="schema-check-grid">
+            {generatedPatch.fixedSignals.map((signal) => (
+              <ScanCheck key={signal.id} label={signal.label} done={signal.done} />
+            ))}
+          </div>
+
+          <div className="schema-install-list">
+            {generatedPatch.installTargets.map((target) => (
+              <span key={target}>{target}</span>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Coverage</p>
+              <h2>Fields included</h2>
+            </div>
+            <ListChecks size={19} />
+          </div>
+          <div className="schema-field-list">
+            {generatedPatch.fieldCoverage.map((field) => (
+              <ScanCheck key={field.label} label={field.label} done={field.done} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="panel schema-code-panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Install snippet</p>
+            <h2>JSON-LD script</h2>
+          </div>
+          <div className="schema-button-row">
+            <button
+              className="secondary-button"
+              onClick={() =>
+                copyText("snippet", generatedPatch.installSnippet)
+              }
+            >
+              <Copy size={16} />
+              <span>{copiedTarget === "snippet" ? "Copied" : "Copy snippet"}</span>
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() =>
+                copyText(
+                  "json",
+                  JSON.stringify(generatedPatch.schemaJson, null, 2)
+                )
+              }
+            >
+              <Copy size={16} />
+              <span>{copiedTarget === "json" ? "Copied" : "Copy JSON"}</span>
+            </button>
+            <button className="secondary-button" onClick={downloadSchema}>
+              <Download size={16} />
+              <span>Download</span>
+            </button>
+            <a
+              className="secondary-button"
+              href={generatedPatch.validationUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ArrowUpRight size={16} />
+              <span>Validate</span>
+            </a>
+          </div>
+        </div>
+        <pre className="schema-code">{generatedPatch.installSnippet}</pre>
+      </section>
+    </div>
+  );
+}
+
+function slugForFile(value) {
+  return String(value || "schema")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function AiAudit({

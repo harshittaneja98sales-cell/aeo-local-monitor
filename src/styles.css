@@ -279,6 +279,101 @@ button {
   gap: 16px;
 }
 
+.schema-workspace {
+  display: grid;
+  gap: 16px;
+}
+
+.schema-control {
+  display: grid;
+  gap: 12px;
+}
+
+.schema-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.schema-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.schema-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.schema-notice {
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f0f9ff;
+  color: #075985;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.schema-split {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.9fr) minmax(420px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.schema-check-grid,
+.schema-field-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.schema-install-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.schema-install-list span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 9px;
+}
+
+.schema-code-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.schema-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.schema-code {
+  background: #0f172a;
+  border-radius: 8px;
+  color: #dbeafe;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: 520px;
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .audit-control {
   display: grid;
   gap: 10px;
@@ -1318,6 +1413,7 @@ dd {
 
   .dashboard-grid,
   .audit-split,
+  .schema-split,
   .onboarding-grid,
   .audit-grid,
   .settings-grid {
@@ -1351,9 +1447,12 @@ dd {
 
   .metric-row,
   .audit-metrics,
+  .schema-summary-grid,
   .audit-warning-strip,
   .audit-status-strip,
   .website-scan-grid,
+  .schema-check-grid,
+  .schema-field-list,
   .graph-grid,
   .detail-grid,
   .prompt-card-grid,
@@ -1366,6 +1465,15 @@ dd {
   .saved-run-row,
   .saved-run-scores {
     grid-template-columns: 1fr;
+  }
+
+  .schema-action-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .schema-button-row {
+    justify-content: stretch;
   }
 
   .engine-row {

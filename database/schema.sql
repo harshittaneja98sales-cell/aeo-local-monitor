@@ -34,9 +34,28 @@ CREATE TABLE IF NOT EXISTS audit_runs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS schema_patches (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'ready',
+  title TEXT NOT NULL,
+  schema_type TEXT,
+  schema_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  install_snippet TEXT NOT NULL,
+  fixed_signals JSONB NOT NULL DEFAULT '[]'::jsonb,
+  field_coverage JSONB NOT NULL DEFAULT '[]'::jsonb,
+  install_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
+  validation_url TEXT,
+  request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS businesses_updated_at_idx ON businesses (updated_at DESC);
 CREATE INDEX IF NOT EXISTS audit_runs_business_created_idx
   ON audit_runs (business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS schema_patches_business_created_idx
+  ON schema_patches (business_id, created_at DESC);
 
 ALTER TABLE businesses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE schema_patches ENABLE ROW LEVEL SECURITY;

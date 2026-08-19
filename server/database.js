@@ -46,6 +46,25 @@ CREATE TABLE IF NOT EXISTS audit_runs (
 CREATE INDEX IF NOT EXISTS businesses_updated_at_idx ON businesses (updated_at DESC);
 CREATE INDEX IF NOT EXISTS audit_runs_business_created_idx
   ON audit_runs (business_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS schema_patches (
+  id TEXT PRIMARY KEY,
+  business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'ready',
+  title TEXT NOT NULL,
+  schema_type TEXT,
+  schema_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  install_snippet TEXT NOT NULL,
+  fixed_signals JSONB NOT NULL DEFAULT '[]'::jsonb,
+  field_coverage JSONB NOT NULL DEFAULT '[]'::jsonb,
+  install_targets JSONB NOT NULL DEFAULT '[]'::jsonb,
+  validation_url TEXT,
+  request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS schema_patches_business_created_idx
+  ON schema_patches (business_id, created_at DESC);
 `;
 
 export function isDatabaseConfigured(env = process.env) {
@@ -180,6 +199,53 @@ export async function saveAuditRun({ businessId, audit, request }, env = process
   );
 
   return serializeAuditRun(result.rows[0]);
+}
+
+export async function saveSchemaPatch(
+  { businessId, schemaPatch, request },
+  env = process.env
+) {
+  await ensureSchema(env);
+  const client = getPool(env);
+  const result = await client.query(
+    `
+    INSERT INTO schema_patches (
+      id,
+      business_id,
+      status,
+      title,
+      schema_type,
+      schema_json,
+      install_snippet,
+      fixed_signals,
+      field_coverage,
+      install_targets,
+      validation_url,
+      request_payload
+    )
+    VALUES (
+      $1, $2, $3, $4, $5,
+      $6::jsonb, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12::jsonb
+    )
+    RETURNING *
+    `,
+    [
+      crypto.randomUUID(),
+      businessId,
+      schemaPatch.status || "ready",
+      schemaPatch.title || "Entity schema fix",
+      schemaPatch.schemaType || "",
+      JSON.stringify(schemaPatch.schemaJson || {}),
+      schemaPatch.installSnippet || "",
+      JSON.stringify(schemaPatch.fixedSignals || []),
+      JSON.stringify(schemaPatch.fieldCoverage || []),
+      JSON.stringify(schemaPatch.installTargets || []),
+      schemaPatch.validationUrl || "",
+      JSON.stringify(request || {}),
+    ]
+  );
+
+  return serializeSchemaPatch(result.rows[0]);
 }
 
 export async function listBusinesses(env = process.env) {
@@ -375,6 +441,23 @@ function serializeAuditRun(row) {
     inputWarnings: row.input_warnings || [],
     providerStatus: row.provider_status || [],
     profileSnapshot: row.profile_snapshot || {},
+    createdAt: row.created_at,
+  };
+}
+
+function serializeSchemaPatch(row) {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    status: row.status,
+    title: row.title,
+    schemaType: row.schema_type,
+    schemaJson: row.schema_json || {},
+    installSnippet: row.install_snippet || "",
+    fixedSignals: row.fixed_signals || [],
+    fieldCoverage: row.field_coverage || [],
+    installTargets: row.install_targets || [],
+    validationUrl: row.validation_url,
     createdAt: row.created_at,
   };
 }
