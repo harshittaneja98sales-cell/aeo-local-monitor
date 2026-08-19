@@ -1420,6 +1420,44 @@ function getMonitorAlertTypeLabel(type) {
   return labels[type] || "Monitor alert";
 }
 
+function isLiveProviderResult(result) {
+  return ["live-openrouter-web-search", "live-openai-web-search"].includes(
+    result.providerMode
+  );
+}
+
+function isProviderFallbackResult(result) {
+  return result.providerMode === "live-provider-prompt-fallback";
+}
+
+function getResultProviderLabel(result) {
+  if (isLiveProviderResult(result)) return "Live";
+  if (isProviderFallbackResult(result)) return "Fallback";
+  return "Modeled";
+}
+
+function getResultProviderClass(result) {
+  if (isLiveProviderResult(result)) return "live";
+  if (isProviderFallbackResult(result)) return "fallback";
+  return "modeled";
+}
+
+function getResultStatusClass(result) {
+  if (result.mentioned && result.cited) return "cited";
+  if (result.mentioned) return "mentioned";
+  return "missed";
+}
+
+function getResultChipClass(result) {
+  return `result-chip ${getResultStatusClass(result)} ${getResultProviderClass(
+    result
+  )}`;
+}
+
+function getEngineDisplayName(name) {
+  return String(name || "").replace("Google AI Overviews", "Google AI");
+}
+
 function formatDateTime(value) {
   if (!value) return "Not available";
   const date = new Date(value);
@@ -1941,6 +1979,16 @@ function AiAudit({
   const running = auditState === "running";
   const visibleAuditMode = running ? auditMode : auditReport.mode || auditMode;
   const modeNotice = auditNotice || getAuditModeNotice(visibleAuditMode);
+  const liveRows = results.filter(isLiveProviderResult).length;
+  const fallbackRows = results.filter(isProviderFallbackResult).length;
+  const modeledRows = Math.max(0, results.length - liveRows - fallbackRows);
+  const matrixStatus = [
+    `${liveRows} live`,
+    `${modeledRows} modeled`,
+    fallbackRows > 0 ? `${fallbackRows} fallback` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="audit-workspace">
@@ -2139,10 +2187,17 @@ function AiAudit({
         <div className="panel-head">
           <div>
             <p className="eyebrow">Hyper-local prompts</p>
-            <h2>Prompt simulation matrix</h2>
+            <h2>Prompt audit matrix</h2>
           </div>
-          <span className="quiet-status">{prompts.length} prompts x 4 engines</span>
+          <span className="quiet-status">{matrixStatus}</span>
         </div>
+        {modeledRows > 0 && (
+          <div className="audit-explainer">
+            ChatGPT with Search is live when OpenRouter returns a grounded answer.
+            Perplexity, Gemini, and Google AI rows are modeled until their direct
+            connectors are added.
+          </div>
+        )}
         <div className="prompt-card-grid">
           {prompts.map((prompt) => (
             <article className="prompt-card" key={prompt.id}>
@@ -2156,16 +2211,14 @@ function AiAudit({
                   .filter((result) => result.promptId === prompt.id)
                   .map((result) => (
                     <span
-                      className={
-                        result.mentioned
-                          ? result.cited
-                            ? "result-chip cited"
-                            : "result-chip mentioned"
-                          : "result-chip missed"
-                      }
+                      className={getResultChipClass(result)}
                       key={result.id}
+                      title={`${getEngineDisplayName(
+                        result.engine
+                      )}: ${getResultProviderLabel(result)}`}
                     >
-                      {result.engine.replace("Google AI Overviews", "Google AI")}
+                      <span>{getEngineDisplayName(result.engine)}</span>
+                      <small>{getResultProviderLabel(result)}</small>
                     </span>
                   ))}
               </div>
@@ -2187,21 +2240,22 @@ function AiAudit({
             {visibleResults.map((result) => (
               <article className="audit-result-row" key={result.id}>
                 <div className="audit-result-top">
-                  <strong>{result.engine}</strong>
-                  <span
-                    className={
-                      result.mentioned
+                  <div className="audit-result-title">
+                    <strong>{result.engine}</strong>
+                    <span
+                      className={`provider-chip ${getResultProviderClass(result)}`}
+                    >
+                      {getResultProviderLabel(result)}
+                    </span>
+                  </div>
+                  <span className={getResultChipClass(result)}>
+                    <span>
+                      {result.mentioned
                         ? result.cited
-                          ? "result-chip cited"
-                          : "result-chip mentioned"
-                        : "result-chip missed"
-                    }
-                  >
-                    {result.mentioned
-                      ? result.cited
-                        ? "Mentioned + cited"
-                        : "Mentioned"
-                      : "Skipped"}
+                          ? "Mentioned + cited"
+                          : "Mentioned"
+                        : "Skipped"}
+                    </span>
                   </span>
                 </div>
                 <p>{result.finding}</p>

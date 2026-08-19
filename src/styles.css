@@ -1559,6 +1559,17 @@ button {
   padding: 5px 8px;
 }
 
+.audit-explainer {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
 .prompt-card-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1595,12 +1606,28 @@ button {
 .result-chip {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   border-radius: 999px;
   min-height: 24px;
   padding: 4px 8px;
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.result-chip span {
+  color: inherit;
+}
+
+.result-chip small {
+  border-left: 1px solid currentColor;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0.72;
+  padding-left: 5px;
+  text-transform: uppercase;
 }
 
 .result-chip.cited {
@@ -1616,6 +1643,49 @@ button {
 .result-chip.missed {
   color: #9f1239;
   background: #ffe4e6;
+}
+
+.result-chip.live {
+  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.28);
+}
+
+.result-chip.modeled {
+  filter: saturate(0.78);
+}
+
+.result-chip.fallback {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.audit-result-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.provider-chip {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 7px;
+  text-transform: uppercase;
+}
+
+.provider-chip.live {
+  background: #ccfbf1;
+  color: #115e59;
+}
+
+.provider-chip.modeled {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.provider-chip.fallback {
+  background: #fef3c7;
+  color: #92400e;
 }
 
 .audit-split {
