@@ -357,11 +357,12 @@ function analyzeWebsitePages(pages, startUrl, request) {
   const combinedJsonLd = pageSummaries
     .map((page) => page.jsonLd)
     .join("\n/* AEO_JSON_LD_BLOCK */\n");
-  const combinedText = pageSummaries.map((page) => page.text).join(" ").toLowerCase();
+  const combinedRawText = pageSummaries.map((page) => page.text).join(" ");
+  const combinedText = combinedRawText.toLowerCase();
   const extractedProfile = extractWebsiteProfile({
     pageSummaries,
     combinedJsonLd,
-    combinedText,
+    combinedText: combinedRawText,
     startUrl,
   });
   const serviceTerms = splitCsv(request.profile.services);
@@ -464,13 +465,20 @@ function extractWebsiteProfile({ pageSummaries, combinedJsonLd, combinedText, st
   const structured = extractStructuredBusinessProfile(combinedJsonLd);
   const homepage = pageSummaries[0] || {};
   const titleName = cleanTitleForBusiness(homepage.title);
-  const phone = structured.phone || extractPhoneFromText(combinedText);
-  const address = structured.address || extractAddressFromText(combinedText);
+  const searchableText = [
+    homepage.title,
+    homepage.metaDescription,
+    combinedText,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const phone = structured.phone || extractPhoneFromText(searchableText);
+  const address = structured.address || extractAddressFromText(searchableText);
   const market =
     structured.market ||
     extractMarketFromAddress(address) ||
-    extractMarketFromText(combinedText);
-  const services = extractServicesFromMetadata(homepage, combinedText);
+    extractMarketFromText(searchableText);
+  const services = extractServicesFromMetadata(homepage, searchableText);
 
   return removeEmptyValues({
     name: structured.name || titleName || inferNameFromUrl(startUrl),
@@ -623,13 +631,34 @@ function extractAddressFromText(text) {
 }
 
 function extractMarketFromAddress(address) {
-  const match = String(address || "").match(/([A-Za-z .'-]+),\s*([A-Z]{2})\b/i);
-  return match ? `${titleCase(match[1].trim())}, ${match[2].toUpperCase()}` : "";
+  const match = String(address || "").match(
+    /\b([A-Za-z][A-Za-z .'-]{1,38}?),\s*([A-Z]{2})\b/
+  );
+  if (!match || !isUsStateCode(match[2])) return "";
+  return formatMarket(match[1], match[2]);
 }
 
 function extractMarketFromText(text) {
-  const match = String(text || "").match(/\b([A-Z][a-z .'-]+),\s*([A-Z]{2})\b/i);
-  return match ? `${titleCase(match[1].trim())}, ${match[2].toUpperCase()}` : "";
+  const source = normalizeWhitespace(text);
+  const patterns = [
+    /\b(?:serving|serves|service area|located in|based in|near|in)\s+([A-Z][A-Za-z .'-]{1,38}?),\s*([A-Z]{2})\b/g,
+    /\b([A-Z][A-Za-z .'-]{1,38}?),\s*([A-Z]{2})\s+(?:plumber|plumbing|dentist|dental|restaurant|lawyer|attorney|hvac|salon|auto|cars|dealer|dealership)\b/g,
+  ];
+
+  for (const pattern of patterns) {
+    const matches = [...source.matchAll(pattern)];
+    const market = matches
+      .map((match) => formatMarket(match[1], match[2]))
+      .find(isCleanMarket);
+    if (market) return market;
+  }
+
+  const countyMatch = source.match(
+    /\b([A-Z][A-Za-z .'-]{1,36}\s+County)\s+(?:plumber|plumbing|dentist|dental|restaurant|lawyer|attorney|hvac|salon|auto|cars|dealer|dealership)\b/
+  );
+  if (countyMatch) return titleCase(countyMatch[1].trim());
+
+  return "";
 }
 
 function extractServicesFromMetadata(homepage, text) {
@@ -705,6 +734,90 @@ function stringValue(value) {
   if (Array.isArray(value)) return stringValue(value[0]);
   if (value && typeof value === "object") return stringValue(value.name || value["@id"]);
   return String(value || "").trim();
+}
+
+function formatMarket(city, state) {
+  const stateCode = String(state || "").trim().toUpperCase();
+  if (!isUsStateCode(stateCode)) return "";
+  const cityName = titleCase(
+    String(city || "")
+      .replace(/\b(?:serving|serves|service area|located in|based in|near|in)\b/gi, "")
+      .trim()
+  );
+
+  return isCleanMarket(`${cityName}, ${stateCode}`) ? `${cityName}, ${stateCode}` : "";
+}
+
+function isCleanMarket(value) {
+  const market = String(value || "").trim();
+  const [city = "", state = ""] = market.split(",").map((part) => part.trim());
+  const rejectedWords =
+    /\b(?:about|blog|call|contact|core|customer|fast|home|hours|quality|reliable|review|same|service|values|work)\b/i;
+
+  return (
+    city.length >= 3 &&
+    city.length <= 42 &&
+    !/\d/.test(city) &&
+    !/[.!?]/.test(city) &&
+    !rejectedWords.test(city) &&
+    isUsStateCode(state)
+  );
+}
+
+function isUsStateCode(value) {
+  return new Set([
+    "AL",
+    "AK",
+    "AZ",
+    "AR",
+    "CA",
+    "CO",
+    "CT",
+    "DE",
+    "FL",
+    "GA",
+    "HI",
+    "IA",
+    "ID",
+    "IL",
+    "IN",
+    "KS",
+    "KY",
+    "LA",
+    "MA",
+    "MD",
+    "ME",
+    "MI",
+    "MN",
+    "MO",
+    "MS",
+    "MT",
+    "NC",
+    "ND",
+    "NE",
+    "NH",
+    "NJ",
+    "NM",
+    "NV",
+    "NY",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VA",
+    "VT",
+    "WA",
+    "WI",
+    "WV",
+    "WY",
+    "DC",
+  ]).has(String(value || "").trim().toUpperCase());
 }
 
 function normalizeWhitespace(value) {

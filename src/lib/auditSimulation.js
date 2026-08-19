@@ -78,9 +78,14 @@ export function runLocalAiAudit({
 }
 
 export function buildHyperLocalPrompts({ profile, businessType, monitoredLocations }) {
-  const city = extractCity(profile.market);
-  const primaryLocation = monitoredLocations.find(Boolean) || city;
-  const secondaryLocation = monitoredLocations.filter(Boolean)[1] || city;
+  const city = cleanPromptLocation(extractCity(profile.market));
+  const primaryLocation =
+    cleanPromptLocation(monitoredLocations.find(Boolean)) || city;
+  const secondaryLocation =
+    cleanPromptLocation(monitoredLocations.filter(Boolean)[1]) ||
+    primaryLocation ||
+    city;
+  const localArea = primaryLocation || city || "the local service area";
   const service = firstService(profile.services) || businessType.highIntentService;
   const businessName = cleanBusinessName(profile.name);
 
@@ -89,37 +94,37 @@ export function buildHyperLocalPrompts({ profile, businessType, monitoredLocatio
       id: "highest-rated",
       intent: "Discovery",
       priority: "High",
-      query: `Who is the highest-rated ${businessType.serviceNoun} in ${primaryLocation} that offers ${service}?`,
+      query: `Who is the highest-rated ${businessType.serviceNoun} in ${localArea} that offers ${service}?`,
     },
     {
       id: "open-now",
       intent: "Urgent Need",
       priority: "High",
-      query: `Best ${businessType.serviceNoun} near ${secondaryLocation} open now`,
+      query: `Best ${businessType.serviceNoun} near ${secondaryLocation || localArea} open now`,
     },
     {
       id: "problem-solution",
       intent: "Service",
       priority: "High",
-      query: `Who should I call for ${businessType.urgentNeed} in ${city}?`,
+      query: `Who should I call for ${businessType.urgentNeed} in ${city || localArea}?`,
     },
     {
       id: "brand-check",
       intent: "Fact Check",
       priority: "Medium",
-      query: `Is ${businessName} a good option for ${businessType.categoryTerm} in ${city}?`,
+      query: `Is ${businessName} a good option for ${businessType.categoryTerm} in ${city || localArea}?`,
     },
     {
       id: "competitor-list",
       intent: "Comparison",
       priority: "Medium",
-      query: `Top local businesses for ${businessType.highIntentService} near ${primaryLocation}`,
+      query: `Top local businesses for ${businessType.highIntentService} near ${localArea}`,
     },
     {
       id: "fastest-response",
       intent: "Decision",
       priority: "Medium",
-      query: `Which ${businessType.serviceNoun} has the fastest response in ${city}?`,
+      query: `Which ${businessType.serviceNoun} has the fastest response in ${city || localArea}?`,
     },
   ];
 }
@@ -433,6 +438,21 @@ function splitCsv(value) {
 
 function extractCity(market) {
   return String(market || "your market").split(",")[0].trim();
+}
+
+function cleanPromptLocation(value) {
+  const location = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const rejected =
+    /\b(?:believe|core values|customer wants|highest quality|ready to work|same day|skilled technicians)\b/i;
+
+  if (!location || location === "your market") return "";
+  if (location.length > 48 || /[.!?]/.test(location) || rejected.test(location)) {
+    return "";
+  }
+
+  return location;
 }
 
 function cleanBusinessName(name) {
