@@ -36,6 +36,7 @@ export function runLocalAiAudit({
   monitoredLocations,
   sourceCompletion,
 }) {
+  const inputWarnings = detectInputWarnings(profile, businessType);
   const prompts = buildHyperLocalPrompts({
     profile,
     businessType,
@@ -65,6 +66,7 @@ export function runLocalAiAudit({
 
   return {
     prompts,
+    inputWarnings,
     entityGaps,
     results,
     summary: summarizeResults(results),
@@ -78,6 +80,7 @@ export function buildHyperLocalPrompts({ profile, businessType, monitoredLocatio
   const primaryLocation = monitoredLocations.find(Boolean) || city;
   const secondaryLocation = monitoredLocations.filter(Boolean)[1] || city;
   const service = firstService(profile.services) || businessType.highIntentService;
+  const businessName = cleanBusinessName(profile.name);
 
   return [
     {
@@ -102,7 +105,7 @@ export function buildHyperLocalPrompts({ profile, businessType, monitoredLocatio
       id: "brand-check",
       intent: "Fact Check",
       priority: "Medium",
-      query: `Is ${profile.name} a good option for ${businessType.categoryTerm} in ${city}?`,
+      query: `Is ${businessName} a good option for ${businessType.categoryTerm} in ${city}?`,
     },
     {
       id: "competitor-list",
@@ -123,6 +126,17 @@ export function detectEntityGaps(profile) {
   const gaps = [];
   const services = splitCsv(profile.services);
 
+  if (!profile.name) {
+    gaps.push({
+      id: "business-name",
+      severity: "High",
+      title: "Business name missing",
+      detail:
+        "Mention detection needs the exact brand name before the audit can decide whether an answer recommends the business.",
+      fix: "Enter the exact business name as it appears on Google Business Profile and the website.",
+    });
+  }
+
   if (!profile.website) {
     gaps.push({
       id: "website",
@@ -140,6 +154,21 @@ export function detectEntityGaps(profile) {
       detail:
         "The website should be stored as a crawlable canonical URL so the audit can scan owned pages and detect citations.",
       fix: "Use a full URL such as https://example.com.",
+    });
+  }
+
+  const websiteCategory = inferCategoryFromWebsite(profile.website);
+  if (
+    websiteCategory &&
+    profile.businessType &&
+    websiteCategory.toLowerCase() !== String(profile.businessType).toLowerCase()
+  ) {
+    gaps.push({
+      id: "category-website-mismatch",
+      severity: "High",
+      title: "Website and business type do not match",
+      detail: `The website appears related to ${websiteCategory}, but the selected business type is ${profile.businessType}.`,
+      fix: "Select the correct business type or enter the website for the selected business.",
     });
   }
 
@@ -212,26 +241,35 @@ function simulateEngineResult({
   engine,
   engineIndex,
   prompt,
-  promptIndex,
-  profile,
+      promptIndex,
+      profile,
   businessType,
   competitors,
   sourceCompletion,
   entityGaps,
 }) {
-  const isBrandPrompt = prompt.query
-    .toLowerCase()
-    .includes(profile.name.toLowerCase());
+  const businessName = cleanBusinessName(profile.name);
+  const isBrandPrompt =
+    Boolean(String(profile.name || "").trim()) &&
+    prompt.query.toLowerCase().includes(String(profile.name).toLowerCase());
   const highSeverityGaps = entityGaps.filter((gap) => gap.severity === "High")
     .length;
   const promptPenalty = [0, -8, -5, 10, -11, -14][promptIndex] || 0;
   const gapPenalty = highSeverityGaps * 9 + entityGaps.length * 2;
+  const missingNamePenalty = profile.name ? 0 : 38;
+  const mismatchPenalty = entityGaps.some(
+    (gap) => gap.id === "category-website-mismatch"
+  )
+    ? 22
+    : 0;
   const signalScore =
     sourceCompletion +
     engine.mentionBias +
     promptPenalty +
     (isBrandPrompt ? 16 : 0) -
     gapPenalty +
+    -missingNamePenalty +
+    -mismatchPenalty +
     deterministicJitter(promptIndex, engineIndex);
   const mentioned = signalScore >= 54;
   const cited = mentioned && signalScore + engine.citationBias >= 68;
@@ -265,7 +303,8 @@ function simulateEngineResult({
       mentioned,
       cited,
       source,
-      profile,
+    profile,
+    businessName,
       businessType,
       competitors: competitorRecommendations,
     }),
@@ -358,15 +397,16 @@ function buildFinding({
   cited,
   source,
   profile,
+  businessName,
   businessType,
   competitors,
 }) {
   if (mentioned && cited) {
-    return `${engine.shortName} recommends ${profile.name} and cites ${source}.`;
+    return `${engine.shortName} recommends ${businessName} and cites ${source}.`;
   }
 
   if (mentioned) {
-    return `${engine.shortName} mentions ${profile.name}, but does not cite a direct owned source.`;
+    return `${engine.shortName} mentions ${businessName}, but does not cite a direct owned source.`;
   }
 
   return `${engine.shortName} recommends ${competitors
@@ -391,6 +431,71 @@ function splitCsv(value) {
 
 function extractCity(market) {
   return String(market || "your market").split(",")[0].trim();
+}
+
+function cleanBusinessName(name) {
+  return String(name || "").trim() || "the entered business";
+}
+
+function detectInputWarnings(profile, businessType) {
+  const warnings = [];
+
+  if (!String(profile.name || "").trim()) {
+    warnings.push({
+      id: "missing-name",
+      label: "Business name is missing",
+      detail: "Mention scoring will be conservative until the exact brand name is entered.",
+    });
+  }
+
+  if (!String(profile.website || "").trim()) {
+    warnings.push({
+      id: "missing-website",
+      label: "Brand website is missing",
+      detail: "Citation and entity-gap checks need the canonical website URL.",
+    });
+  } else if (!isUrlLike(profile.website)) {
+    warnings.push({
+      id: "weak-website",
+      label: "Website URL looks incomplete",
+      detail: "Use a full URL such as https://example.com.",
+    });
+  }
+
+  const websiteCategory = inferCategoryFromWebsite(profile.website);
+  if (
+    websiteCategory &&
+    businessType?.label &&
+    websiteCategory.toLowerCase() !== businessType.label.toLowerCase()
+  ) {
+    warnings.push({
+      id: "category-mismatch",
+      label: "Website and selected category may not match",
+      detail: `The URL looks like ${websiteCategory}, but the audit is set to ${businessType.label}.`,
+    });
+  }
+
+  return warnings;
+}
+
+function inferCategoryFromWebsite(website) {
+  const value = String(website || "").toLowerCase();
+  const checks = [
+    ["plumb", "Plumbing"],
+    ["hvac", "HVAC"],
+    ["heating", "HVAC"],
+    ["air", "HVAC"],
+    ["dental", "Dentistry"],
+    ["dentist", "Dentistry"],
+    ["restaurant", "Restaurant"],
+    ["kitchen", "Restaurant"],
+    ["salon", "Salon"],
+    ["hair", "Salon"],
+    ["law", "Law Firm"],
+    ["legal", "Law Firm"],
+  ];
+  const match = checks.find(([needle]) => value.includes(needle));
+  return match ? match[1] : null;
 }
 
 function isUrlLike(value) {

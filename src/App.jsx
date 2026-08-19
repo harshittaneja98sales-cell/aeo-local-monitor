@@ -468,7 +468,14 @@ function AiAudit({
   sourceCompletion,
   onRunAudit,
 }) {
-  const { summary, prompts, results, entityGaps, competitorShare } = auditReport;
+  const {
+    summary,
+    prompts,
+    results,
+    inputWarnings,
+    entityGaps,
+    competitorShare,
+  } = auditReport;
   const visibleResults = results.slice(0, 12);
   const completed = auditState === "complete";
   const running = auditState === "running";
@@ -547,6 +554,20 @@ function AiAudit({
           </button>
         </div>
       </section>
+
+      {inputWarnings.length > 0 && (
+        <section className="audit-warning-strip">
+          {inputWarnings.map((warning) => (
+            <article className="audit-warning" key={warning.id}>
+              <AlertTriangle size={16} />
+              <div>
+                <strong>{warning.label}</strong>
+                <span>{warning.detail}</span>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
 
       <section className="audit-metrics">
         <AuditMetric

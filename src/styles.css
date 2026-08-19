@@ -333,6 +333,39 @@ button {
   gap: 12px;
 }
 
+.audit-warning-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.audit-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid #f8d48b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #713f12;
+  padding: 10px 12px;
+}
+
+.audit-warning svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.audit-warning strong,
+.audit-warning span {
+  display: block;
+}
+
+.audit-warning span {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 .audit-metric-card {
   box-shadow: none;
 }
@@ -1177,6 +1210,7 @@ dd {
 
   .metric-row,
   .audit-metrics,
+  .audit-warning-strip,
   .graph-grid,
   .detail-grid,
   .prompt-card-grid,
