@@ -2018,7 +2018,14 @@ function AiAudit({
             />
           </label>
 
-          <button className="primary-button audit-run-button" onClick={onRunAudit}>
+          <button
+            className={`primary-button audit-run-button ${
+              running ? "is-loading" : ""
+            }`}
+            onClick={onRunAudit}
+            disabled={running}
+            aria-busy={running}
+          >
             {running ? <RefreshCw className="spin" size={17} /> : <Search size={17} />}
             <span>{running ? "Running audit" : "Run AI search audit"}</span>
           </button>

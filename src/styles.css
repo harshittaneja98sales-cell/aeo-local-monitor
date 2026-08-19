@@ -901,6 +901,23 @@ button {
   font-weight: 700;
 }
 
+.primary-button:disabled,
+.primary-button.is-loading {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
+  cursor: progress;
+  opacity: 1;
+}
+
+.primary-button:disabled svg,
+.primary-button:disabled span,
+.primary-button.is-loading svg,
+.primary-button.is-loading span {
+  color: #ffffff;
+  opacity: 1;
+}
+
 .secondary-button {
   background: #ffffff;
   color: var(--text);
