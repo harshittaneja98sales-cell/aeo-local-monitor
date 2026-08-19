@@ -38,7 +38,13 @@ export async function runServerAudit(payload = {}, env = process.env) {
         openRouterApiKey,
       });
       const openRouterStatus =
-        openRouterBatch.failedCount > 0 ? "partial" : "live";
+        openRouterBatch.failedCount === 0
+          ? "live"
+          : openRouterBatch.failedCount === openRouterBatch.results.length
+            ? "fallback"
+            : "partial";
+      const openRouterSuccessCount =
+        openRouterBatch.results.length - openRouterBatch.failedCount;
 
       return buildLiveAudit({
         simulatedAudit,
@@ -52,7 +58,7 @@ export async function runServerAudit(payload = {}, env = process.env) {
             status: openRouterStatus,
             detail:
               openRouterBatch.failedCount > 0
-                ? `${openRouterBatch.results.length - openRouterBatch.failedCount}/${openRouterBatch.results.length} ChatGPT-style rows used grounded OpenRouter output; slow rows used simulator fallback.`
+                ? `${openRouterSuccessCount}/${openRouterBatch.results.length} ChatGPT-style rows used grounded OpenRouter output; slow rows used simulator fallback.`
                 : "ChatGPT-style rows use grounded OpenRouter output with web search.",
           },
           {
@@ -534,10 +540,6 @@ async function runOpenRouterSearchAudit({
     })
   );
   const failedCount = settled.filter((item) => item.status === "rejected").length;
-
-  if (failedCount === settled.length) {
-    throw new Error("OpenRouter web search failed for every audited prompt.");
-  }
 
   return {
     results: settled.map((item) => item.value),
