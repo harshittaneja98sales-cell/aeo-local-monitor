@@ -38,13 +38,31 @@ export async function runServerAudit(payload = {}, env = process.env) {
     };
   }
 
-  const openAiResults = await runOpenAiSearchAudit({
-    request,
-    simulatedResults: simulatedAudit.results,
-    websiteScan,
-    env,
-    openAiApiKey,
-  });
+  let openAiResults;
+  try {
+    openAiResults = await runOpenAiSearchAudit({
+      request,
+      simulatedResults: simulatedAudit.results,
+      websiteScan,
+      env,
+      openAiApiKey,
+    });
+  } catch (error) {
+    return {
+      ...simulatedAudit,
+      mode: "openai-error-fallback",
+      providerStatus: [
+        {
+          provider: "OpenAI web search",
+          status: "error",
+          detail: getErrorMessage(error),
+        },
+      ],
+      websiteScan,
+      entityGaps,
+      generatedAt: new Date().toISOString(),
+    };
+  }
   const results = simulatedAudit.results.map((result) => {
     if (result.engineId !== "chatgpt-search") return result;
     return openAiResults.find((openAiResult) => openAiResult.id === result.id) || result;
@@ -615,6 +633,11 @@ function normalizeText(value) {
 
 function getOpenAiApiKey(env) {
   return env.OPENAI_API_KEY || env.OPENAI_api_KEY || "";
+}
+
+function getErrorMessage(error) {
+  if (error instanceof Error && error.message) return error.message;
+  return "OpenAI request failed before a provider response could be parsed.";
 }
 
 export { auditEngines };
