@@ -1911,6 +1911,12 @@ function getResultStatusClass(result) {
   return "missed";
 }
 
+function getResultOutcomeLabel(result) {
+  if (result.mentioned && result.cited) return "Cited";
+  if (result.mentioned) return "Mentioned";
+  return "Skipped";
+}
+
 function getResultChipClass(result) {
   return `result-chip ${getResultStatusClass(result)} ${getResultProviderClass(
     result
@@ -2942,37 +2948,76 @@ function AiAudit({
         </div>
         {modeledRows > 0 && (
           <div className="audit-explainer">
-            ChatGPT with Search is live when OpenRouter returns a grounded answer.
-            Perplexity, Gemini, and Google AI rows are modeled until their direct
-            connectors are added.
+            Only ChatGPT with Search is live right now. Red live chips mean the
+            live answer skipped the business; modeled chips are forecast rows for
+            providers that are not connected yet.
           </div>
         )}
         <div className="prompt-card-grid">
-          {prompts.map((prompt) => (
-            <article className="prompt-card" key={prompt.id}>
-              <div className="prompt-card-head">
-                <span className="intent-chip">{prompt.intent}</span>
-                <span className="quiet-status">{prompt.priority}</span>
-              </div>
-              <strong>{prompt.query}</strong>
-              <div className="engine-result-strip">
-                {results
-                  .filter((result) => result.promptId === prompt.id)
-                  .map((result) => (
+          {prompts.map((prompt) => {
+            const promptResults = results.filter(
+              (result) => result.promptId === prompt.id
+            );
+            const livePromptResults = promptResults.filter(
+              (result) =>
+                isLiveProviderResult(result) || isProviderFallbackResult(result)
+            );
+
+            return (
+              <article className="prompt-card" key={prompt.id}>
+                <div className="prompt-card-head">
+                  <span className="intent-chip">{prompt.intent}</span>
+                  <span className="quiet-status">{prompt.priority}</span>
+                </div>
+                <strong>{prompt.query}</strong>
+                <div className="engine-result-strip">
+                  {promptResults.map((result) => (
                     <span
                       className={getResultChipClass(result)}
                       key={result.id}
                       title={`${getEngineDisplayName(
                         result.engine
-                      )}: ${getResultProviderLabel(result)}`}
+                      )}: ${getResultOutcomeLabel(result)} (${getResultProviderLabel(
+                        result
+                      )})`}
                     >
-                      <span>{getEngineDisplayName(result.engine)}</span>
+                      <span>
+                        {getEngineDisplayName(result.engine)}:{" "}
+                        {getResultOutcomeLabel(result)}
+                      </span>
                       <small>{getResultProviderLabel(result)}</small>
                     </span>
                   ))}
-              </div>
-            </article>
-          ))}
+                </div>
+                {livePromptResults.length > 0 && (
+                  <div className="prompt-evidence-list">
+                    {livePromptResults.map((result) => (
+                      <article className="prompt-evidence" key={`${result.id}-evidence`}>
+                        <div>
+                          <strong>
+                            {getEngineDisplayName(result.engine)} live evidence
+                          </strong>
+                          <span className={getResultChipClass(result)}>
+                            <span>{getResultOutcomeLabel(result)}</span>
+                          </span>
+                        </div>
+                        <p>
+                          {result.responseExcerpt
+                            ? result.responseExcerpt
+                            : result.finding}
+                        </p>
+                        <small>
+                          {result.source
+                            ? `Source: ${result.source}`
+                            : "No direct citation found"}
+                        </small>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </article>
+            );
+          })}
         </div>
       </section>
 

@@ -2093,6 +2093,45 @@ button {
   flex-wrap: wrap;
 }
 
+.prompt-evidence-list {
+  display: grid;
+  gap: 8px;
+}
+
+.prompt-evidence {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+}
+
+.prompt-evidence > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prompt-evidence strong {
+  font-size: 13px;
+}
+
+.prompt-evidence p {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+}
+
+.prompt-evidence small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .result-chip {
   display: inline-flex;
   align-items: center;
