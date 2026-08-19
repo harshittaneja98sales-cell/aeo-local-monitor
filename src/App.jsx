@@ -94,6 +94,7 @@ const defaultMonitorSummary = {
   citations: 0,
   competitors: 0,
 };
+const AUDIT_CLIENT_TIMEOUT_MS = 35000;
 
 function getInitialWorkspace() {
   const fallbackType = "plumbing";
@@ -424,6 +425,11 @@ function App() {
     if (auditState === "running") return;
     const requestAuditInputKey = currentAuditInputKey;
     const payload = buildServerPayload();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      AUDIT_CLIENT_TIMEOUT_MS
+    );
     setAuditState("running");
     setAuditMode("server-running");
     setServerAuditReport(null);
@@ -434,6 +440,7 @@ function App() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -469,9 +476,7 @@ function App() {
     } catch (error) {
       setAuditMode("local-simulation");
       setAuditNotice(
-        `Live audit endpoint failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }. Showing local simulation data instead.`
+        `${getAuditErrorMessage(error)} Showing local simulation data instead.`
       );
       setPersistenceStatus({
         mode: "disabled",
@@ -479,6 +484,7 @@ function App() {
           "Audit history is not available on this preview until DATABASE_URL is configured.",
       });
     } finally {
+      window.clearTimeout(timeout);
       setAuditState("complete");
     }
   }
@@ -1453,6 +1459,15 @@ function getAuditModeNotice(mode) {
     return "OpenAI is configured, but the provider request failed, so this run used fallback scoring.";
   }
   return "This preview is using deterministic local simulation data.";
+}
+
+function getAuditErrorMessage(error) {
+  if (error?.name === "AbortError") {
+    return "Live audit timed out after 35 seconds.";
+  }
+  return `Live audit endpoint failed: ${
+    error instanceof Error ? error.message : "Unknown error"
+  }.`;
 }
 
 function getMonitorAlertTypeLabel(type) {

@@ -14,7 +14,7 @@ const OPENROUTER_CHAT_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 const MAX_EXTRA_PAGES = 3;
 const FETCH_TIMEOUT_MS = 9000;
-const OPENROUTER_PROMPT_TIMEOUT_MS = 18000;
+const OPENROUTER_PROMPT_TIMEOUT_MS = 12000;
 
 export async function runServerAudit(payload = {}, env = process.env) {
   const request = normalizeAuditPayload(payload);
