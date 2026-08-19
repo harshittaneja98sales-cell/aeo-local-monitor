@@ -217,7 +217,7 @@ function App() {
   const [monitorNotice, setMonitorNotice] = useState("");
   const [persistenceStatus, setPersistenceStatus] = useState({
     mode: "unknown",
-    detail: "Run an audit after connecting DATABASE_URL to save history.",
+    detail: "Run an audit to start building trend history.",
   });
   const [selectedTask, setSelectedTask] = useState(
     businessTemplates[workspace.selectedBusinessType].remediationTasks[0]
@@ -311,7 +311,7 @@ function App() {
         setPersistenceStatus({
           mode: "disabled",
           detail:
-            "Audit history is not available on this preview until DATABASE_URL is configured.",
+            "Audit history is temporarily unavailable. New runs can still be reviewed after completion.",
         });
       });
 
@@ -481,7 +481,7 @@ function App() {
       setPersistenceStatus({
         mode: "disabled",
         detail:
-          "Audit history is not available on this preview until DATABASE_URL is configured.",
+          "Audit history is temporarily unavailable. New runs can still be reviewed after completion.",
       });
     } finally {
       window.clearTimeout(timeout);
@@ -1012,7 +1012,7 @@ function LandingPage({ onOpenApp }) {
             <LandingStat value="4" label="AI answer engines simulated" />
             <LandingStat value="1-click" label="JSON-LD schema generation" />
             <LandingStat value="0 code" label="Copy, validate, and install flow" />
-            <LandingStat value="Saved" label="Audit history with Supabase" />
+            <LandingStat value="Saved" label="Audit history and trends" />
           </div>
         </section>
 
@@ -1182,7 +1182,7 @@ function LandingPage({ onOpenApp }) {
               />
               <FaqItem
                 question="Is the product live?"
-                answer="Yes. The app is deployed on Vercel with saved audit runs and schema patch storage connected through Supabase."
+                answer="Yes. The app is live, and completed audits, schema fixes, and monitoring history are saved for each business."
               />
             </div>
           </div>
@@ -1458,7 +1458,7 @@ function getAuditModeNotice(mode) {
   if (mode === "openai-error-fallback") {
     return "OpenAI is configured, but the provider request failed, so this run used fallback scoring.";
   }
-  return "This preview is using deterministic local simulation data.";
+  return "This run is using deterministic local simulation data.";
 }
 
 function getAuditErrorMessage(error) {
@@ -1786,8 +1786,8 @@ function ContinuousMonitor({
           </div>
           <p className="quiet-status">
             {persistenceStatus.mode === "database"
-              ? "Alerts are saved to Supabase and reused between sessions."
-              : "Connect DATABASE_URL before alerts can be persisted."}
+              ? "Alerts are saved and reused between sessions."
+              : "Alert history will appear after the monitor saves its first run."}
           </p>
         </div>
       </section>
@@ -2395,6 +2395,26 @@ function ScanCheck({ label, done }) {
 function SavedAuditRunsPanel({ savedAuditRuns, persistenceStatus, businessId }) {
   const connected = persistenceStatus?.mode === "database";
   const errored = persistenceStatus?.mode === "error";
+  const hasRuns = savedAuditRuns.length > 0;
+  const statusLabel = hasRuns
+    ? "Tracking active"
+    : errored
+      ? "History issue"
+      : businessId || connected
+        ? "Ready"
+        : "Not started";
+  const statusClass = hasRuns || connected
+    ? "status-chip database-ready"
+    : errored
+      ? "status-chip database-error"
+      : "status-chip";
+  const note = hasRuns
+    ? "Past audits are saved for trend tracking, reporting, and before-after comparisons."
+    : errored
+      ? "This run completed, but history could not be updated. You can still review the current audit results."
+      : businessId || connected
+        ? "Run the next audit to add a point to the trend history."
+        : "Run the first audit to start trend history for this business.";
 
   return (
     <section className="panel saved-runs-panel">
@@ -2403,29 +2423,12 @@ function SavedAuditRunsPanel({ savedAuditRuns, persistenceStatus, businessId }) 
           <p className="eyebrow">Audit history</p>
           <h2>Saved audit runs</h2>
         </div>
-        <span
-          className={
-            connected
-              ? "status-chip database-ready"
-              : errored
-                ? "status-chip database-error"
-                : "status-chip"
-          }
-        >
-          {connected ? "Database connected" : errored ? "Save error" : "Not connected"}
-        </span>
+        <span className={statusClass}>{statusLabel}</span>
       </div>
 
-      <p className="saved-runs-note">
-        {connected
-          ? businessId
-            ? "Each completed run is stored for trend tracking and reports."
-            : "Run the first audit to create this business record."
-          : persistenceStatus?.detail ||
-            "Set DATABASE_URL to start saving businesses and audit runs."}
-      </p>
+      <p className="saved-runs-note">{note}</p>
 
-      {savedAuditRuns.length > 0 && (
+      {hasRuns ? (
         <div className="saved-run-list">
           {savedAuditRuns.map((run) => (
             <article className="saved-run-row" key={run.id}>
@@ -2440,6 +2443,11 @@ function SavedAuditRunsPanel({ savedAuditRuns, persistenceStatus, businessId }) 
               </div>
             </article>
           ))}
+        </div>
+      ) : (
+        <div className="empty-state compact">
+          <strong>No saved audits yet</strong>
+          <span>Run an audit to create the first history entry.</span>
         </div>
       )}
     </section>
