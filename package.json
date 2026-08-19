@@ -13,6 +13,7 @@
     "cheerio": "^1.2.0",
     "lucide-react": "^0.539.0",
     "openai": "^7.5.0",
+    "pg": "^8.23.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "typescript": "^5.9.2",

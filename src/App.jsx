@@ -85,6 +85,7 @@ function getInitialWorkspace() {
   const template = businessTemplates[selectedBusinessType];
 
   return {
+    businessId: saved?.businessId || null,
     selectedBusinessType,
     profile: { ...template.business, ...saved?.profile },
     competitors: saved?.competitors || [
@@ -131,10 +132,16 @@ function App() {
   const [serverAuditReport, setServerAuditReport] = useState(null);
   const [auditMode, setAuditMode] = useState("local-simulation");
   const [auditNotice, setAuditNotice] = useState("");
+  const [savedAuditRuns, setSavedAuditRuns] = useState([]);
+  const [persistenceStatus, setPersistenceStatus] = useState({
+    mode: "unknown",
+    detail: "Run an audit after connecting DATABASE_URL to save history.",
+  });
   const [selectedTask, setSelectedTask] = useState(
     businessTemplates[workspace.selectedBusinessType].remediationTasks[0]
   );
   const selectedBusinessType = workspace.selectedBusinessType;
+  const businessId = workspace.businessId;
   const profile = workspace.profile;
   const competitors = workspace.competitors;
   const monitoredLocations = workspace.monitoredLocations;
@@ -176,6 +183,37 @@ function App() {
     window.localStorage.setItem("aeo-local-workspace", JSON.stringify(workspace));
   }, [workspace]);
 
+  useEffect(() => {
+    if (!businessId) {
+      setSavedAuditRuns([]);
+      return;
+    }
+
+    let cancelled = false;
+    fetch(`/api/audit-runs?businessId=${encodeURIComponent(businessId)}&limit=10`)
+      .then((response) => {
+        if (!response.ok) throw new Error("Audit history endpoint failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setSavedAuditRuns(data.auditRuns || []);
+        if (data.persistence) setPersistenceStatus(data.persistence);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPersistenceStatus({
+          mode: "disabled",
+          detail:
+            "Audit history is not available on this preview until DATABASE_URL is configured.",
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
   function setProfile(nextProfile) {
     resetAuditResult();
     setWorkspace((current) => ({
@@ -214,6 +252,7 @@ function App() {
     const nextType = businessTypes.find((type) => type.id === typeId);
     resetAuditResult();
     setWorkspace({
+      businessId: null,
       selectedBusinessType: typeId,
       profile: nextTemplate.business,
       competitors: nextType ? [nextType.competitorA, nextType.competitorB] : [],
@@ -253,6 +292,7 @@ function App() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           profile,
+          businessId,
           businessType: businessTypes.find(
             (type) => type.id === selectedBusinessType
           ),
@@ -274,11 +314,31 @@ function App() {
       setServerAuditReport(data.audit);
       setAuditMode(data.audit.mode || data.mode || "server");
       setAuditNotice(getAuditModeNotice(data.audit.mode || data.mode));
+      if (data.persistence) setPersistenceStatus(data.persistence);
+      if (data.business?.id) {
+        setWorkspace((current) => ({
+          ...current,
+          businessId: data.business.id,
+        }));
+      }
+      if (data.auditRun) {
+        setSavedAuditRuns((current) =>
+          [
+            data.auditRun,
+            ...current.filter((run) => run.id !== data.auditRun.id),
+          ].slice(0, 10)
+        );
+      }
     } catch {
       setAuditMode("local-simulation");
       setAuditNotice(
         "Live audit endpoint is unavailable on this static preview, so this run is using local simulation."
       );
+      setPersistenceStatus({
+        mode: "disabled",
+        detail:
+          "Audit history is not available on this preview until DATABASE_URL is configured.",
+      });
     } finally {
       setAuditState("complete");
     }
@@ -383,6 +443,9 @@ function App() {
             auditState={auditState}
             auditMode={auditMode}
             auditNotice={auditNotice}
+            savedAuditRuns={savedAuditRuns}
+            persistenceStatus={persistenceStatus}
+            businessId={businessId}
             sourceCompletion={sourceCompletion}
             onRunAudit={runAudit}
           />
@@ -544,6 +607,9 @@ function AiAudit({
   auditState,
   auditMode,
   auditNotice,
+  savedAuditRuns,
+  persistenceStatus,
+  businessId,
   sourceCompletion,
   onRunAudit,
 }) {
@@ -732,6 +798,12 @@ function AiAudit({
         />
       </section>
 
+      <SavedAuditRunsPanel
+        savedAuditRuns={savedAuditRuns}
+        persistenceStatus={persistenceStatus}
+        businessId={businessId}
+      />
+
       <section className="panel wide">
         <div className="panel-head">
           <div>
@@ -868,6 +940,70 @@ function ScanCheck({ label, done }) {
       <span>{label}</span>
     </div>
   );
+}
+
+function SavedAuditRunsPanel({ savedAuditRuns, persistenceStatus, businessId }) {
+  const connected = persistenceStatus?.mode === "database";
+  const errored = persistenceStatus?.mode === "error";
+
+  return (
+    <section className="panel saved-runs-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Audit history</p>
+          <h2>Saved audit runs</h2>
+        </div>
+        <span
+          className={
+            connected
+              ? "status-chip database-ready"
+              : errored
+                ? "status-chip database-error"
+                : "status-chip"
+          }
+        >
+          {connected ? "Database connected" : errored ? "Save error" : "Not connected"}
+        </span>
+      </div>
+
+      <p className="saved-runs-note">
+        {connected
+          ? businessId
+            ? "Each completed run is stored for trend tracking and reports."
+            : "Run the first audit to create this business record."
+          : persistenceStatus?.detail ||
+            "Set DATABASE_URL to start saving businesses and audit runs."}
+      </p>
+
+      {savedAuditRuns.length > 0 && (
+        <div className="saved-run-list">
+          {savedAuditRuns.map((run) => (
+            <article className="saved-run-row" key={run.id}>
+              <div>
+                <strong>{formatRunDate(run.createdAt)}</strong>
+                <span>{getAuditModeLabel(run.mode)}</span>
+              </div>
+              <div className="saved-run-scores">
+                <Metric label="Share" value={`${run.summary?.shareOfVoice ?? 0}%`} />
+                <Metric label="Mentions" value={run.summary?.mentions ?? 0} />
+                <Metric label="Score" value={run.summary?.mentionScore ?? 0} />
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function formatRunDate(value) {
+  if (!value) return "Just now";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function AuditMetric({ label, value, detail }) {

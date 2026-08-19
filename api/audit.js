@@ -1,4 +1,10 @@
 import { runServerAudit } from "../server/auditCore.js";
+import {
+  getDatabaseStatus,
+  isDatabaseConfigured,
+  saveAuditRun,
+  upsertBusinessFromAudit,
+} from "../server/database.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -12,7 +18,32 @@ export default async function handler(req, res) {
         ? JSON.parse(req.body)
         : req.body || {};
     const audit = await runServerAudit(body);
-    return res.status(200).json({ audit, mode: audit.mode });
+    const persistence = getDatabaseStatus();
+    let business = null;
+    let auditRun = null;
+
+    if (isDatabaseConfigured()) {
+      try {
+        business = await upsertBusinessFromAudit(body);
+        auditRun = await saveAuditRun({
+          businessId: business.id,
+          audit,
+          request: { ...body, businessId: business.id },
+        });
+      } catch (error) {
+        persistence.mode = "error";
+        persistence.detail =
+          error instanceof Error ? error.message : "Audit run could not be saved.";
+      }
+    }
+
+    return res.status(200).json({
+      audit,
+      mode: audit.mode,
+      business,
+      auditRun,
+      persistence,
+    });
   } catch (error) {
     return res.status(500).json({
       error: "Audit failed",

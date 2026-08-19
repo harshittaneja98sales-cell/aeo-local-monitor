@@ -427,6 +427,65 @@ button {
   line-height: 1.35;
 }
 
+.saved-runs-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.saved-runs-note {
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.saved-run-list {
+  display: grid;
+  gap: 8px;
+}
+
+.saved-run-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.saved-run-row strong,
+.saved-run-row span {
+  display: block;
+}
+
+.saved-run-row span {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.saved-run-scores {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.saved-run-scores .metric {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 9px;
+}
+
+.status-chip.database-ready {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-chip.database-error {
+  background: #ffe4e6;
+  color: #9f1239;
+}
+
 .website-scan-panel {
   display: grid;
   gap: 12px;
@@ -1303,7 +1362,9 @@ dd {
   }
 
   .audit-setup,
-  .audit-input-grid {
+  .audit-input-grid,
+  .saved-run-row,
+  .saved-run-scores {
     grid-template-columns: 1fr;
   }
 
