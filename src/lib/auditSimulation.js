@@ -132,6 +132,15 @@ export function detectEntityGaps(profile) {
         "AI answers need a crawlable owned source before the business can be cited directly.",
       fix: "Add the canonical website URL and make sure key service pages are indexable.",
     });
+  } else if (!isUrlLike(profile.website)) {
+    gaps.push({
+      id: "website-format",
+      severity: "Medium",
+      title: "Website URL may be incomplete",
+      detail:
+        "The website should be stored as a crawlable canonical URL so the audit can scan owned pages and detect citations.",
+      fix: "Use a full URL such as https://example.com.",
+    });
   }
 
   if (!profile.address) {
@@ -332,10 +341,11 @@ function getCompetitorRecommendations(
 }
 
 function getBestSource(profile, promptIndex) {
+  const website = normalizeWebsite(profile.website);
   const sources = [
-    profile.website,
+    website,
     "Google Business Profile",
-    `${profile.website}/services`,
+    `${website}/services`,
     "Local directory citation",
   ];
 
@@ -381,4 +391,15 @@ function splitCsv(value) {
 
 function extractCity(market) {
   return String(market || "your market").split(",")[0].trim();
+}
+
+function isUrlLike(value) {
+  return /^https?:\/\/[^\s]+\.[^\s]+/i.test(String(value || "").trim());
+}
+
+function normalizeWebsite(value) {
+  const website = String(value || "").trim();
+  if (!website) return "Owned website";
+  if (/^https?:\/\//i.test(website)) return website.replace(/\/$/, "");
+  return `https://${website.replace(/\/$/, "")}`;
 }

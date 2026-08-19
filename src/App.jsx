@@ -323,6 +323,7 @@ function App() {
         {activeTab === "audit" && (
           <AiAudit
             profile={profile}
+            setProfile={setProfile}
             selectedBusinessType={selectedBusinessType}
             businessTypes={businessTypes}
             onBusinessTypeChange={changeBusinessType}
@@ -458,6 +459,7 @@ function Overview({
 
 function AiAudit({
   profile,
+  setProfile,
   selectedBusinessType,
   businessTypes,
   onBusinessTypeChange,
@@ -499,19 +501,44 @@ function AiAudit({
             </select>
           </label>
 
-          <div className="audit-target">
-            <div>
+          <div className="audit-input-grid">
+            <label>
               <span>Business</span>
-              <strong>{profile.name}</strong>
-            </div>
-            <div>
-              <span>Address or URL</span>
-              <strong>{profile.address || profile.website}</strong>
-            </div>
-            <div>
+              <input
+                value={profile.name || ""}
+                onChange={(event) =>
+                  setProfile({ ...profile, name: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Brand website</span>
+              <input
+                value={profile.website || ""}
+                placeholder="https://example.com"
+                onChange={(event) =>
+                  setProfile({ ...profile, website: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Address</span>
+              <input
+                value={profile.address || ""}
+                onChange={(event) =>
+                  setProfile({ ...profile, address: event.target.value })
+                }
+              />
+            </label>
+            <label>
               <span>Market</span>
-              <strong>{profile.market}</strong>
-            </div>
+              <input
+                value={profile.market || ""}
+                onChange={(event) =>
+                  setProfile({ ...profile, market: event.target.value })
+                }
+              />
+            </label>
           </div>
 
           <button className="primary-button audit-run-button" onClick={onRunAudit}>
