@@ -228,6 +228,7 @@ button {
   background: #ffffff;
   color: var(--text);
   padding: 0 13px;
+  text-decoration: none;
 }
 
 .icon-button {

@@ -663,6 +663,7 @@ function Overview({
 
 function getAuditModeLabel(mode) {
   if (mode === "openai-web-search") return "Live OpenAI";
+  if (mode === "openai-error-fallback") return "OpenAI fallback";
   if (mode === "server-crawler-simulation") return "Crawler + simulator";
   return "Local simulator";
 }
@@ -673,6 +674,9 @@ function getAuditModeNotice(mode) {
   }
   if (mode === "server-crawler-simulation") {
     return "The server crawled the brand website, but OPENAI_API_KEY is not configured, so provider answers are simulated.";
+  }
+  if (mode === "openai-error-fallback") {
+    return "OpenAI is configured, but the provider request failed, so this run used fallback scoring.";
   }
   return "This preview is using deterministic local simulation data.";
 }
