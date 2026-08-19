@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import * as cheerio from "cheerio";
+import { businessTypes } from "../src/data/mockData.js";
 import {
   auditEngines,
   runLocalAiAudit,
@@ -8,6 +9,9 @@ import {
 } from "../src/lib/auditSimulation.js";
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
+const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4.1-mini";
+const OPENROUTER_CHAT_COMPLETIONS_URL =
+  "https://openrouter.ai/api/v1/chat/completions";
 const MAX_EXTRA_PAGES = 3;
 const FETCH_TIMEOUT_MS = 9000;
 
@@ -15,74 +19,148 @@ export async function runServerAudit(payload = {}, env = process.env) {
   const request = normalizeAuditPayload(payload);
   const simulatedAudit = runLocalAiAudit(request);
   const websiteScan = await crawlWebsite(request.profile.website, request);
+  const openRouterApiKey = getOpenRouterApiKey(env);
   const openAiApiKey = getOpenAiApiKey(env);
   const entityGaps = mergeEntityGaps(
     simulatedAudit.entityGaps,
     buildWebsiteScanGaps(websiteScan)
   );
+  const providerAttempts = [];
 
-  if (!openAiApiKey) {
-    return {
-      ...simulatedAudit,
-      mode: "server-crawler-simulation",
-      providerStatus: [
-        {
-          provider: "OpenAI web search",
-          status: "not_configured",
-          detail: "Set OPENAI_API_KEY on the server to replace simulated ChatGPT results.",
-        },
-      ],
-      websiteScan,
-      entityGaps,
-      generatedAt: new Date().toISOString(),
-    };
-  }
+  if (openRouterApiKey) {
+    try {
+      const openRouterResults = await runOpenRouterSearchAudit({
+        request,
+        simulatedResults: simulatedAudit.results,
+        websiteScan,
+        env,
+        openRouterApiKey,
+      });
 
-  let openAiResults;
-  try {
-    openAiResults = await runOpenAiSearchAudit({
-      request,
-      simulatedResults: simulatedAudit.results,
-      websiteScan,
-      env,
-      openAiApiKey,
+      return buildLiveAudit({
+        simulatedAudit,
+        liveResults: openRouterResults,
+        websiteScan,
+        entityGaps,
+        mode: "openrouter-web-search",
+        providerStatus: [
+          {
+            provider: "OpenRouter web search",
+            status: "live",
+            detail:
+              "ChatGPT-style rows use grounded OpenRouter output with web search.",
+          },
+          {
+            provider: "Perplexity, Gemini, Google AI Overviews",
+            status: "simulated",
+            detail:
+              "Direct provider connectors are not enabled yet, so those rows remain modeled.",
+          },
+        ],
+      });
+    } catch (error) {
+      providerAttempts.push({
+        provider: "OpenRouter web search",
+        status: "error",
+        detail: getErrorMessage(error, "OpenRouter request failed."),
+      });
+    }
+  } else {
+    providerAttempts.push({
+      provider: "OpenRouter web search",
+      status: "not_configured",
+      detail:
+        "Set OPENROUTER_API_KEY on the server to use OpenRouter before OpenAI.",
     });
-  } catch (error) {
-    return {
-      ...simulatedAudit,
-      mode: "openai-error-fallback",
-      providerStatus: [
-        {
-          provider: "OpenAI web search",
-          status: "error",
-          detail: getErrorMessage(error),
-        },
-      ],
-      websiteScan,
-      entityGaps,
-      generatedAt: new Date().toISOString(),
-    };
   }
+
+  if (openAiApiKey) {
+    try {
+      const openAiResults = await runOpenAiSearchAudit({
+        request,
+        simulatedResults: simulatedAudit.results,
+        websiteScan,
+        env,
+        openAiApiKey,
+      });
+
+      return buildLiveAudit({
+        simulatedAudit,
+        liveResults: openAiResults,
+        websiteScan,
+        entityGaps,
+        mode: "openai-web-search",
+        providerStatus: [
+          ...providerAttempts.filter((attempt) => attempt.status === "error"),
+          {
+            provider: "OpenAI web search",
+            status: "live",
+            detail: "ChatGPT with Search rows use real grounded provider output.",
+          },
+          {
+            provider: "Perplexity, Gemini, Google AI Overviews",
+            status: "simulated",
+            detail:
+              "Provider connectors are not enabled yet, so those rows remain modeled.",
+          },
+        ],
+      });
+    } catch (error) {
+      providerAttempts.push({
+        provider: "OpenAI web search",
+        status: "error",
+        detail: getErrorMessage(error, "OpenAI request failed."),
+      });
+    }
+  } else {
+    providerAttempts.push({
+      provider: "OpenAI web search",
+      status: "not_configured",
+      detail:
+        "Set OPENAI_API_KEY on the server to replace simulated ChatGPT results.",
+    });
+  }
+
+  return {
+    ...simulatedAudit,
+    mode:
+      providerAttempts.some((attempt) => attempt.status === "error")
+        ? "live-provider-error-fallback"
+        : "server-crawler-simulation",
+    providerStatus:
+      providerAttempts.length > 0
+        ? providerAttempts
+        : [
+            {
+              provider: "OpenAI web search",
+              status: "not_configured",
+              detail:
+                "Set OPENAI_API_KEY on the server to replace simulated ChatGPT results.",
+            },
+          ],
+    websiteScan,
+    entityGaps,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function buildLiveAudit({
+  simulatedAudit,
+  liveResults,
+  websiteScan,
+  entityGaps,
+  mode,
+  providerStatus,
+}) {
   const results = simulatedAudit.results.map((result) => {
     if (result.engineId !== "chatgpt-search") return result;
-    return openAiResults.find((openAiResult) => openAiResult.id === result.id) || result;
+    return liveResults.find((liveResult) => liveResult.id === result.id) || result;
   });
 
   return {
     ...simulatedAudit,
-    mode: "openai-web-search",
-    providerStatus: [
-      {
-        provider: "OpenAI web search",
-        status: "live",
-        detail: "ChatGPT with Search rows use real grounded provider output.",
-      },
-      {
-        provider: "Perplexity, Gemini, Google AI Overviews",
-        status: "simulated",
-        detail: "Provider connectors are not enabled yet, so those rows remain modeled.",
-      },
-    ],
+    mode,
+    providerStatus,
     websiteScan,
     entityGaps,
     results,
@@ -94,10 +172,13 @@ export async function runServerAudit(payload = {}, env = process.env) {
 
 function normalizeAuditPayload(payload) {
   const profile = payload.profile && typeof payload.profile === "object" ? payload.profile : {};
+  const selectedType = businessTypes.find(
+    (type) => type.id === payload.selectedBusinessType
+  );
   const businessType =
     payload.businessType && typeof payload.businessType === "object"
       ? payload.businessType
-      : {};
+      : selectedType || {};
 
   return {
     profile,
@@ -402,12 +483,99 @@ async function runOpenAiSearchAudit({
   return results;
 }
 
+async function runOpenRouterSearchAudit({
+  request,
+  simulatedResults,
+  websiteScan,
+  env,
+  openRouterApiKey,
+}) {
+  const prompts = simulatedResults
+    .filter((result) => result.engineId === "chatgpt-search")
+    .map((result) => ({
+      prompt: {
+        id: result.promptId,
+        query: result.query,
+        intent: result.intent,
+        priority: result.priority,
+      },
+      fallback: result,
+    }));
+
+  const results = [];
+  for (const item of prompts) {
+    results.push(
+      await runOpenRouterPrompt({
+        env,
+        openRouterApiKey,
+        request,
+        prompt: item.prompt,
+        fallback: item.fallback,
+        websiteScan,
+      })
+    );
+  }
+  return results;
+}
+
 async function runOpenAiPrompt({ client, env, request, prompt, fallback, websiteScan }) {
   const response = await createOpenAiResponse(client, env, {
     model: env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
     input: buildOpenAiAuditPrompt(request, prompt, websiteScan),
   });
   const outputText = extractOutputText(response);
+  return buildLivePromptResult({
+    response,
+    outputText,
+    request,
+    fallback,
+    providerMode: "live-openai-web-search",
+    providerLabel: "OpenAI web search",
+  });
+}
+
+async function runOpenRouterPrompt({
+  env,
+  openRouterApiKey,
+  request,
+  prompt,
+  fallback,
+  websiteScan,
+}) {
+  const response = await createOpenRouterChatCompletion(env, openRouterApiKey, {
+    model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You audit local AI answer visibility. Answer naturally with current web evidence. Include source URLs when available.",
+      },
+      {
+        role: "user",
+        content: buildOpenAiAuditPrompt(request, prompt, websiteScan),
+      },
+    ],
+    temperature: 0.2,
+  });
+  const outputText = extractChatCompletionText(response);
+  return buildLivePromptResult({
+    response,
+    outputText,
+    request,
+    fallback,
+    providerMode: "live-openrouter-web-search",
+    providerLabel: "OpenRouter web search",
+  });
+}
+
+function buildLivePromptResult({
+  response,
+  outputText,
+  request,
+  fallback,
+  providerMode,
+  providerLabel,
+}) {
   const urls = extractUrlsFromResponse(response).concat(extractUrlsFromText(outputText));
   const uniqueUrls = [...new Set(urls)];
   const businessName = String(request.profile.name || "").trim();
@@ -432,7 +600,7 @@ async function runOpenAiPrompt({ client, env, request, prompt, fallback, website
     source,
     competitorRecommendations,
     confidence: cited ? 88 : mentioned ? 76 : 62,
-    providerMode: "live-openai-web-search",
+    providerMode,
     responseExcerpt: outputText.slice(0, 700),
     finding: buildLiveFinding({
       mentioned,
@@ -440,6 +608,7 @@ async function runOpenAiPrompt({ client, env, request, prompt, fallback, website
       source,
       businessName,
       competitorRecommendations,
+      providerLabel,
     }),
   };
 }
@@ -460,6 +629,56 @@ async function createOpenAiResponse(client, env, request) {
       include: ["web_search_call.action.sources"],
     });
   }
+}
+
+async function createOpenRouterChatCompletion(env, apiKey, request) {
+  const body = {
+    ...request,
+    tools: [
+      {
+        type: "openrouter:web_search",
+        parameters: {
+          engine: env.OPENROUTER_SEARCH_ENGINE || "auto",
+          max_results: parseIntegerEnv(env.OPENROUTER_SEARCH_RESULTS, 4, 1, 8),
+          search_context_size: env.OPENROUTER_SEARCH_CONTEXT_SIZE || "medium",
+        },
+      },
+    ],
+  };
+  const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
+    method: "POST",
+    headers: buildOpenRouterHeaders(env, apiKey),
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(
+      `OpenRouter HTTP ${response.status}: ${truncateText(detail, 500)}`
+    );
+  }
+
+  return response.json();
+}
+
+function buildOpenRouterHeaders(env, apiKey) {
+  const headers = {
+    authorization: `Bearer ${apiKey}`,
+    "content-type": "application/json",
+    "x-title": "AEO Local Monitor",
+  };
+  const referer = getOpenRouterReferer(env);
+  if (referer) headers["http-referer"] = referer;
+  return headers;
+}
+
+function getOpenRouterReferer(env) {
+  if (env.OPENROUTER_SITE_URL) return env.OPENROUTER_SITE_URL;
+  if (env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+  if (env.VERCEL_URL) return `https://${env.VERCEL_URL}`;
+  return "";
 }
 
 function buildOpenAiAuditPrompt(request, prompt, websiteScan) {
@@ -496,6 +715,17 @@ function extractOutputText(response) {
   return response.output
     .flatMap((item) => item.content || [])
     .map((content) => content.text || content.output_text || "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function extractChatCompletionText(response) {
+  const content = response?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+
+  return content
+    .map((item) => item.text || item.content || "")
     .filter(Boolean)
     .join("\n");
 }
@@ -565,15 +795,22 @@ function findBestSource(urls, ownedHost) {
   );
 }
 
-function buildLiveFinding({ mentioned, cited, source, businessName, competitorRecommendations }) {
+function buildLiveFinding({
+  mentioned,
+  cited,
+  source,
+  businessName,
+  competitorRecommendations,
+  providerLabel = "Live web search",
+}) {
   const label = businessName || "the target business";
   if (mentioned && cited) {
-    return `OpenAI web search mentions ${label} and returns ${source} as a supporting source.`;
+    return `${providerLabel} mentions ${label} and returns ${source} as a supporting source.`;
   }
   if (mentioned) {
-    return `OpenAI web search mentions ${label}, but no direct source URL was parsed from the answer.`;
+    return `${providerLabel} mentions ${label}, but no direct source URL was parsed from the answer.`;
   }
-  return `OpenAI web search did not recommend ${label}; it favored ${competitorRecommendations
+  return `${providerLabel} did not recommend ${label}; it favored ${competitorRecommendations
     .slice(0, 2)
     .join(" and ")} for this prompt.`;
 }
@@ -624,6 +861,17 @@ function firstCsv(value) {
   return splitCsv(value)[0];
 }
 
+function parseIntegerEnv(value, fallback, min, max) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
 function normalizeText(value) {
   return String(value || "")
     .toLowerCase()
@@ -631,13 +879,17 @@ function normalizeText(value) {
     .trim();
 }
 
+function getOpenRouterApiKey(env) {
+  return env.OPENROUTER_API_KEY || env.OPENROUTER_api_KEY || "";
+}
+
 function getOpenAiApiKey(env) {
   return env.OPENAI_API_KEY || env.OPENAI_api_KEY || "";
 }
 
-function getErrorMessage(error) {
+function getErrorMessage(error, fallback = "Provider request failed.") {
   if (error instanceof Error && error.message) return error.message;
-  return "OpenAI request failed before a provider response could be parsed.";
+  return `${fallback} No provider response could be parsed.`;
 }
 
 export { auditEngines };
