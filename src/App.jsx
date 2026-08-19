@@ -134,6 +134,14 @@ function getInitialRoute() {
   return window.location.hash === "#app" ? "app" : "landing";
 }
 
+function normalizeWebsiteInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return raw;
+  if (raw.includes(".")) return `https://${raw}`;
+  return raw;
+}
+
 function App() {
   const [workspace, setWorkspace] = useState(getInitialWorkspace);
   const [activeTab, setActiveTab] = useState("audit");
@@ -1466,45 +1474,56 @@ function AiAudit({
             </select>
           </label>
 
-          <div className="audit-input-grid">
-            <label>
-              <span>Business</span>
-              <input
-                value={profile.name || ""}
-                onChange={(event) =>
-                  setProfile({ ...profile, name: event.target.value })
+          <label>
+            <span>Business</span>
+            <input
+              value={profile.name || ""}
+              placeholder="RapidFlow Plumbing"
+              onChange={(event) =>
+                setProfile({ ...profile, name: event.target.value })
+              }
+            />
+          </label>
+          <label className="website-field">
+            <span>Brand website</span>
+            <input
+              type="url"
+              inputMode="url"
+              autoComplete="url"
+              spellCheck="false"
+              value={profile.website || ""}
+              placeholder="https://choiceplumbingorlando.com"
+              onBlur={(event) => {
+                const website = normalizeWebsiteInput(event.target.value);
+                if (website !== profile.website) {
+                  setProfile({ ...profile, website });
                 }
-              />
-            </label>
-            <label>
-              <span>Brand website</span>
-              <input
-                value={profile.website || ""}
-                placeholder="https://example.com"
-                onChange={(event) =>
-                  setProfile({ ...profile, website: event.target.value })
-                }
-              />
-            </label>
-            <label>
-              <span>Address</span>
-              <input
-                value={profile.address || ""}
-                onChange={(event) =>
-                  setProfile({ ...profile, address: event.target.value })
-                }
-              />
-            </label>
-            <label>
-              <span>Market</span>
-              <input
-                value={profile.market || ""}
-                onChange={(event) =>
-                  setProfile({ ...profile, market: event.target.value })
-                }
-              />
-            </label>
-          </div>
+              }}
+              onChange={(event) =>
+                setProfile({ ...profile, website: event.target.value })
+              }
+            />
+          </label>
+          <label className="address-field">
+            <span>Address</span>
+            <input
+              value={profile.address || ""}
+              placeholder="2147 S Lamar Blvd"
+              onChange={(event) =>
+                setProfile({ ...profile, address: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            <span>Market</span>
+            <input
+              value={profile.market || ""}
+              placeholder="Austin, TX"
+              onChange={(event) =>
+                setProfile({ ...profile, market: event.target.value })
+              }
+            />
+          </label>
 
           <button className="primary-button audit-run-button" onClick={onRunAudit}>
             {running ? <RefreshCw className="spin" size={17} /> : <Search size={17} />}

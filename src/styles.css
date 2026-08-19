@@ -1059,8 +1059,8 @@ button {
 
 .audit-setup {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) auto;
-  gap: 14px;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(320px, 1.25fr);
+  gap: 12px;
   align-items: end;
 }
 
@@ -1068,36 +1068,45 @@ button {
   width: 100%;
 }
 
-.audit-input-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.audit-input-grid label {
+.audit-setup label {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
-.audit-input-grid span {
+.audit-setup span {
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
-.audit-input-grid input {
+.audit-setup input {
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 40px;
   min-width: 0;
+  width: 100%;
   padding: 9px 10px;
   background: #ffffff;
   color: var(--text);
 }
 
+.audit-setup input:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+  outline: 0;
+}
+
+.website-field {
+  grid-column: 1 / -1;
+}
+
 .audit-run-button {
-  min-width: 184px;
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-width: 220px;
+  width: auto;
 }
 
 .audit-metrics {
