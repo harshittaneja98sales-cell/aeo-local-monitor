@@ -16,6 +16,9 @@ import {
   FileText,
   Globe2,
   ListChecks,
+  LockKeyhole,
+  LogOut,
+  Mail,
   MapPin,
   Play,
   Plug,
@@ -24,6 +27,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  UserRound,
   Wrench,
   X,
   Zap,
@@ -41,6 +45,7 @@ import {
 } from "./lib/scoring.js";
 import { runLocalAiAudit } from "./lib/auditSimulation.js";
 import { generateEntitySchemaPatch } from "./lib/schemaGenerator.js";
+import { isSupabaseAuthConfigured, supabase } from "./lib/supabaseClient.js";
 
 const tabs = [
   ["audit", "AI Audit", Bot],
@@ -297,6 +302,8 @@ function App() {
   const [workspace, setWorkspace] = useState(getInitialWorkspace);
   const [activeTab, setActiveTab] = useState("audit");
   const [route, setRoute] = useState(getInitialRoute);
+  const [authSession, setAuthSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(isSupabaseAuthConfigured);
   const [scanState, setScanState] = useState("idle");
   const [auditState, setAuditState] = useState("ready");
   const [serverAuditReport, setServerAuditReport] = useState(null);
@@ -398,6 +405,35 @@ function App() {
     syncRoute();
     window.addEventListener("hashchange", syncRoute);
     return () => window.removeEventListener("hashchange", syncRoute);
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseAuthConfigured || !supabase) {
+      setAuthLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!cancelled) setAuthSession(data.session || null);
+      })
+      .finally(() => {
+        if (!cancelled) setAuthLoading(false);
+      });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthSession(session);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -1059,6 +1095,12 @@ function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  async function signOut() {
+    if (supabase) await supabase.auth.signOut();
+    setAuthSession(null);
+    showLanding();
+  }
+
   function openRemediationForTask(task) {
     setActiveTab(isSchemaRemediationTask(task) ? "schema" : "remediation");
     setSelectedTask(null);
@@ -1067,6 +1109,14 @@ function App() {
 
   if (route === "landing") {
     return <LandingPage onOpenApp={openProduct} />;
+  }
+
+  if (authLoading) {
+    return <AuthLoading />;
+  }
+
+  if (!isSupabaseAuthConfigured || !authSession) {
+    return <AuthPage onBack={showLanding} />;
   }
 
   return (
@@ -1138,6 +1188,13 @@ function App() {
                 <Play size={17} />
               )}
               <span>{scanState === "running" ? "Running" : "Run monitor"}</span>
+            </button>
+            <div className="user-pill" title={authSession.user.email || ""}>
+              <UserRound size={16} />
+              <span>{authSession.user.email}</span>
+            </div>
+            <button className="icon-button" onClick={signOut} title="Sign out">
+              <LogOut size={18} />
             </button>
           </div>
         </header>
@@ -1269,6 +1326,229 @@ function App() {
         onOpenRemediation={openRemediationForTask}
       />
     </div>
+  );
+}
+
+function AuthLoading() {
+  return (
+    <main className="auth-screen">
+      <section className="auth-card auth-loading-card">
+        <div className="brand-mark">
+          <Activity size={20} />
+        </div>
+        <div>
+          <p className="eyebrow">AEO Local</p>
+          <h1>Checking session</h1>
+          <p>Loading your secure workspace.</p>
+        </div>
+        <RefreshCw className="spin" size={22} />
+      </section>
+    </main>
+  );
+}
+
+function AuthPage({ onBack }) {
+  const [mode, setMode] = useState("signin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const isSignup = mode === "signup";
+  const isForgot = mode === "forgot";
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+
+    if (!isSupabaseAuthConfigured || !supabase) {
+      setError("Supabase Auth is not configured yet.");
+      return;
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setError("Enter your email address.");
+      return;
+    }
+    if (!isForgot && password.length < 8) {
+      setError("Use a password with at least 8 characters.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (isForgot) {
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+          cleanEmail,
+          { redirectTo: `${window.location.origin}/#app` }
+        );
+        if (resetError) throw resetError;
+        setNotice("Password reset email sent. Check your inbox.");
+        return;
+      }
+
+      if (isSignup) {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: {
+            data: fullName.trim() ? { full_name: fullName.trim() } : {},
+            emailRedirectTo: `${window.location.origin}/#app`,
+          },
+        });
+        if (signUpError) throw signUpError;
+        setNotice(
+          data.session
+            ? "Account created. Opening your workspace."
+            : "Account created. Check your email to confirm your login."
+        );
+        return;
+      }
+
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
+      if (signInError) throw signInError;
+      setNotice("Signed in. Opening your workspace.");
+    } catch (authError) {
+      setError(
+        authError instanceof Error
+          ? authError.message
+          : "Authentication failed. Try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function switchMode(nextMode) {
+    setMode(nextMode);
+    setError("");
+    setNotice("");
+  }
+
+  return (
+    <main className="auth-screen">
+      <section className="auth-card">
+        <button className="auth-back-button" onClick={onBack} type="button">
+          <ChevronRight size={16} />
+          <span>Back to site</span>
+        </button>
+        <div className="auth-card-head">
+          <div className="brand-mark">
+            <Activity size={20} />
+          </div>
+          <div>
+            <p className="eyebrow">AEO Local</p>
+            <h1>
+              {isForgot
+                ? "Reset your password"
+                : isSignup
+                  ? "Create your account"
+                  : "Sign in to your workspace"}
+            </h1>
+            <p>
+              {isForgot
+                ? "We will send a secure reset link to your email."
+                : "Access audits, schema fixes, monitoring, and saved reports."}
+            </p>
+          </div>
+        </div>
+
+        {!isSupabaseAuthConfigured && (
+          <div className="auth-alert">
+            <LockKeyhole size={16} />
+            <span>
+              Supabase Auth needs `VITE_SUPABASE_URL` and
+              `VITE_SUPABASE_PUBLISHABLE_KEY` in Vercel.
+            </span>
+          </div>
+        )}
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          {isSignup && (
+            <label>
+              <span>Name</span>
+              <input
+                autoComplete="name"
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                placeholder="Harshit Taneja"
+              />
+            </label>
+          )}
+          <label>
+            <span>Email</span>
+            <input
+              autoComplete="email"
+              inputMode="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@company.com"
+            />
+          </label>
+          {!isForgot && (
+            <label>
+              <span>Password</span>
+              <input
+                autoComplete={isSignup ? "new-password" : "current-password"}
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Minimum 8 characters"
+              />
+            </label>
+          )}
+
+          {error && <div className="auth-error">{error}</div>}
+          {notice && <div className="auth-success">{notice}</div>}
+
+          <button
+            className="primary-button auth-submit"
+            disabled={loading || !isSupabaseAuthConfigured}
+            type="submit"
+          >
+            {loading ? <RefreshCw className="spin" size={17} /> : <Mail size={17} />}
+            <span>
+              {loading
+                ? "Please wait"
+                : isForgot
+                  ? "Send reset link"
+                  : isSignup
+                    ? "Create account"
+                    : "Sign in"}
+            </span>
+          </button>
+        </form>
+
+        <div className="auth-switcher">
+          {isForgot ? (
+            <button type="button" onClick={() => switchMode("signin")}>
+              Return to sign in
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => switchMode(isSignup ? "signin" : "signup")}
+              >
+                {isSignup
+                  ? "Already have an account? Sign in"
+                  : "New here? Create an account"}
+              </button>
+              <button type="button" onClick={() => switchMode("forgot")}>
+                Forgot password?
+              </button>
+            </>
+          )}
+        </div>
+      </section>
+    </main>
   );
 }
 
