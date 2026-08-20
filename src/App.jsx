@@ -2906,49 +2906,66 @@ function AiAudit({
         </section>
       )}
 
-      {inputWarnings.length > 0 && (
-        <section className="audit-warning-strip">
-          {inputWarnings.map((warning) => (
-            <article className="audit-warning" key={warning.id}>
-              <AlertTriangle size={16} />
-              <div>
-                <strong>{warning.label}</strong>
-                <span>{warning.detail}</span>
-              </div>
-            </article>
-          ))}
+      {!completed && (
+        <section className="panel audit-empty-state">
+          <div>
+            <p className="eyebrow">Audit report</p>
+            <h2>{running ? "Live audit running" : "Run an audit to see live results"}</h2>
+            <p>
+              {running
+                ? "The app is crawling the website and calling connected AI providers. The prompt matrix will appear when the run finishes."
+                : "Enter a business website and run the audit. Estimated rows are hidden until a completed run is available."}
+            </p>
+          </div>
+          {running ? <RefreshCw className="spin" size={22} /> : <Search size={22} />}
         </section>
       )}
 
-      {websiteScan && (
-        <section className="panel website-scan-panel">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">Owned website crawl</p>
-              <h2>{getWebsiteScanLabel(websiteScan)}</h2>
-            </div>
-            <Globe2 size={19} />
-          </div>
-          <div className="website-scan-grid">
-            <ScanCheck label="LocalBusiness schema" done={websiteScan.hasLocalBusinessSchema} />
-            <ScanCheck label="Opening hours schema" done={websiteScan.hasOpeningHoursSchema} />
-            <ScanCheck label="Geo coordinates" done={websiteScan.hasGeoSchema} />
-            <ScanCheck label="FAQ schema" done={websiteScan.hasFAQSchema} />
-            <ScanCheck label="Phone signal" done={websiteScan.hasPhone} />
-            <ScanCheck
-              label="Service terms"
-              done={(websiteScan.detectedServices || []).length > 0}
-            />
-          </div>
-          {websiteScan.notes?.length > 0 && (
-            <div className="scan-notes">
-              {websiteScan.notes.map((note) => (
-                <span key={note}>{note}</span>
+      {completed && (
+        <>
+          {inputWarnings.length > 0 && (
+            <section className="audit-warning-strip">
+              {inputWarnings.map((warning) => (
+                <article className="audit-warning" key={warning.id}>
+                  <AlertTriangle size={16} />
+                  <div>
+                    <strong>{warning.label}</strong>
+                    <span>{warning.detail}</span>
+                  </div>
+                </article>
               ))}
-            </div>
+            </section>
           )}
-        </section>
-      )}
+
+          {websiteScan && (
+            <section className="panel website-scan-panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Owned website crawl</p>
+                  <h2>{getWebsiteScanLabel(websiteScan)}</h2>
+                </div>
+                <Globe2 size={19} />
+              </div>
+              <div className="website-scan-grid">
+                <ScanCheck label="LocalBusiness schema" done={websiteScan.hasLocalBusinessSchema} />
+                <ScanCheck label="Opening hours schema" done={websiteScan.hasOpeningHoursSchema} />
+                <ScanCheck label="Geo coordinates" done={websiteScan.hasGeoSchema} />
+                <ScanCheck label="FAQ schema" done={websiteScan.hasFAQSchema} />
+                <ScanCheck label="Phone signal" done={websiteScan.hasPhone} />
+                <ScanCheck
+                  label="Service terms"
+                  done={(websiteScan.detectedServices || []).length > 0}
+                />
+              </div>
+              {websiteScan.notes?.length > 0 && (
+                <div className="scan-notes">
+                  {websiteScan.notes.map((note) => (
+                    <span key={note}>{note}</span>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
       <section className="audit-metrics">
         <AuditMetric
@@ -3119,6 +3136,8 @@ function AiAudit({
           ))}
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 }

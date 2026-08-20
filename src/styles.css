@@ -1637,6 +1637,22 @@ button {
   gap: 10px;
 }
 
+.audit-empty-state {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.audit-empty-state p {
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
+.audit-empty-state svg {
+  color: var(--teal);
+}
+
 .audit-status-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
