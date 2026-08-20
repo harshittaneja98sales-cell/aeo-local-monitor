@@ -1954,6 +1954,10 @@ function getEngineDisplayName(name) {
   return String(name || "").replace("Google AI Overviews", "Google AI");
 }
 
+function getEngineChipName(name) {
+  return getEngineDisplayName(name).replace("ChatGPT with Search", "ChatGPT");
+}
+
 function formatDateTime(value) {
   if (!value) return "Not available";
   const date = new Date(value);
@@ -3012,7 +3016,7 @@ function AiAudit({
                       )})`}
                     >
                       <span>
-                        {getEngineDisplayName(result.engine)}:{" "}
+                        {getEngineChipName(result.engine)}:{" "}
                         {getResultOutcomeLabel(result)}
                       </span>
                       <small>{getResultProviderLabel(result)}</small>
