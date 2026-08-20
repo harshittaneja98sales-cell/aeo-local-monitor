@@ -249,6 +249,14 @@ function buildWebsiteOnlyAuditProfile(profile, website, businessType) {
   };
 }
 
+function mergeProfileSnapshot(baseProfile, profileSnapshot) {
+  if (!profileSnapshot || typeof profileSnapshot !== "object") {
+    return baseProfile;
+  }
+
+  return { ...baseProfile, ...profileSnapshot };
+}
+
 function normalizeAuditKeyValue(value) {
   return String(value || "")
     .trim()
@@ -578,12 +586,6 @@ function App() {
       options?.profile && typeof options.profile === "object"
         ? options.profile
         : profile;
-    const requestAuditInputKey = buildAuditInputKey({
-      profile: overrideProfile,
-      selectedBusinessType,
-      competitors,
-      monitoredLocations,
-    });
     const payload = buildServerPayload(
       { smartInputMode: options?.smartInputMode || "" },
       { profile: overrideProfile }
@@ -615,17 +617,30 @@ function App() {
         throw new Error("Audit endpoint returned an empty payload");
       }
 
+      const finalAuditProfile = mergeProfileSnapshot(
+        overrideProfile,
+        data.audit.profileSnapshot
+      );
+      const finalAuditInputKey = buildAuditInputKey({
+        profile: finalAuditProfile,
+        selectedBusinessType,
+        competitors,
+        monitoredLocations,
+      });
+
       setServerAuditReport({
         ...data.audit,
-        auditInputKey: requestAuditInputKey,
+        profileSnapshot: finalAuditProfile,
+        auditInputKey: finalAuditInputKey,
       });
       setAuditMode(data.audit.mode || data.mode || "server");
       setAuditNotice(getAuditModeNotice(data.audit.mode || data.mode));
       if (data.persistence) setPersistenceStatus(data.persistence);
-      if (data.business?.id) {
+      if (data.business?.id || data.audit.profileSnapshot) {
         setWorkspace((current) => ({
           ...current,
-          businessId: data.business.id,
+          businessId: data.business?.id || current.businessId,
+          profile: finalAuditProfile,
         }));
       }
       if (data.auditRun) {
@@ -919,7 +934,6 @@ function App() {
 
   async function runContinuousMonitor() {
     if (monitorState === "running") return;
-    const requestAuditInputKey = currentAuditInputKey;
     setMonitorState("running");
     setMonitorNotice("");
 
@@ -941,9 +955,21 @@ function App() {
         throw new Error(data.detail || data.error);
       }
 
+      const finalAuditProfile = mergeProfileSnapshot(
+        profile,
+        data.audit?.profileSnapshot
+      );
+      const finalAuditInputKey = buildAuditInputKey({
+        profile: finalAuditProfile,
+        selectedBusinessType,
+        competitors,
+        monitoredLocations,
+      });
+
       setServerAuditReport({
         ...data.audit,
-        auditInputKey: requestAuditInputKey,
+        profileSnapshot: finalAuditProfile,
+        auditInputKey: finalAuditInputKey,
       });
       setAuditMode(data.audit?.mode || "server");
       setAuditNotice(getAuditModeNotice(data.audit?.mode));
@@ -951,10 +977,11 @@ function App() {
       setMonitorAlerts(data.alerts || []);
       setMonitorSummary(data.summary || defaultMonitorSummary);
       if (data.persistence) setPersistenceStatus(data.persistence);
-      if (data.business?.id) {
+      if (data.business?.id || data.audit?.profileSnapshot) {
         setWorkspace((current) => ({
           ...current,
-          businessId: data.business.id,
+          businessId: data.business?.id || current.businessId,
+          profile: finalAuditProfile,
         }));
       }
       if (data.auditRun) {
