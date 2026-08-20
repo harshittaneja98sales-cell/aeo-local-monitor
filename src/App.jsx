@@ -198,7 +198,13 @@ function calculateSourceCompletion(profile, competitors, monitoredLocations) {
 
 function getInitialRoute() {
   if (typeof window === "undefined") return "landing";
+  if (window.location.pathname === "/auth/callback") return "app";
   return window.location.hash === "#app" ? "app" : "landing";
+}
+
+function getAuthRedirectUrl() {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}/auth/callback`;
 }
 
 function normalizeWebsiteInput(value) {
@@ -399,13 +405,25 @@ function App() {
 
   useEffect(() => {
     function syncRoute() {
-      setRoute(window.location.hash === "#app" ? "app" : "landing");
+      setRoute(
+        window.location.pathname === "/auth/callback" ||
+          window.location.hash === "#app"
+          ? "app"
+          : "landing"
+      );
     }
 
     syncRoute();
     window.addEventListener("hashchange", syncRoute);
     return () => window.removeEventListener("hashchange", syncRoute);
   }, []);
+
+  useEffect(() => {
+    if (authSession && window.location.pathname === "/auth/callback") {
+      setRoute("app");
+      window.history.replaceState("", document.title, "/#app");
+    }
+  }, [authSession]);
 
   useEffect(() => {
     if (!isSupabaseAuthConfigured || !supabase) {
@@ -1082,8 +1100,9 @@ function App() {
     }
 
     setRoute("app");
-    if (window.location.hash !== "#app") {
-      window.location.hash = "app";
+    if (window.location.pathname !== "/" || window.location.hash !== "#app") {
+      window.history.pushState("", document.title, "/#app");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
     } else {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -1091,7 +1110,7 @@ function App() {
 
   function showLanding() {
     setRoute("landing");
-    window.history.pushState("", document.title, window.location.pathname);
+    window.history.pushState("", document.title, "/");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1355,6 +1374,7 @@ function AuthPage({ onBack }) {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [confirmationEmail, setConfirmationEmail] = useState("");
   const isSignup = mode === "signup";
   const isForgot = mode === "forgot";
 
@@ -1362,6 +1382,7 @@ function AuthPage({ onBack }) {
     event.preventDefault();
     setError("");
     setNotice("");
+    if (!isSignup) setConfirmationEmail("");
 
     if (!isSupabaseAuthConfigured || !supabase) {
       setError("Supabase Auth is not configured yet.");
@@ -1383,7 +1404,7 @@ function AuthPage({ onBack }) {
       if (isForgot) {
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(
           cleanEmail,
-          { redirectTo: `${window.location.origin}/#app` }
+          { redirectTo: getAuthRedirectUrl() }
         );
         if (resetError) throw resetError;
         setNotice("Password reset email sent. Check your inbox.");
@@ -1396,14 +1417,19 @@ function AuthPage({ onBack }) {
           password,
           options: {
             data: fullName.trim() ? { full_name: fullName.trim() } : {},
-            emailRedirectTo: `${window.location.origin}/#app`,
+            emailRedirectTo: getAuthRedirectUrl(),
           },
         });
         if (signUpError) throw signUpError;
+        if (!data.session) {
+          setMode("signin");
+          setPassword("");
+          setConfirmationEmail(cleanEmail);
+        }
         setNotice(
           data.session
             ? "Account created. Opening your workspace."
-            : "Account created. Check your email to confirm your login."
+            : "Account created. Confirm your email, then sign in here."
         );
         return;
       }
@@ -1429,6 +1455,7 @@ function AuthPage({ onBack }) {
     setMode(nextMode);
     setError("");
     setNotice("");
+    setConfirmationEmail("");
   }
 
   return (
@@ -1466,6 +1493,19 @@ function AuthPage({ onBack }) {
               Supabase Auth needs `VITE_SUPABASE_URL` and
               `VITE_SUPABASE_PUBLISHABLE_KEY` in Vercel.
             </span>
+          </div>
+        )}
+
+        {confirmationEmail && (
+          <div className="auth-confirmation-panel">
+            <CheckCircle2 size={18} />
+            <div>
+              <strong>Confirm your email to finish signup</strong>
+              <span>
+                We sent a confirmation link to {confirmationEmail}. After
+                confirming, return here and sign in.
+              </span>
+            </div>
           </div>
         )}
 
