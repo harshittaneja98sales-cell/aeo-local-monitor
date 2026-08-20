@@ -207,6 +207,14 @@ function getAuthRedirectUrl() {
   return `${window.location.origin}/auth/callback`;
 }
 
+function isPasswordRecoveryRedirect() {
+  if (typeof window === "undefined") return false;
+  return (
+    window.location.hash.includes("type=recovery") ||
+    window.location.search.includes("type=recovery")
+  );
+}
+
 function normalizeWebsiteInput(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -310,6 +318,11 @@ function App() {
   const [route, setRoute] = useState(getInitialRoute);
   const [authSession, setAuthSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(isSupabaseAuthConfigured);
+  const [adminPreviewSession, setAdminPreviewSession] = useState(null);
+  const [adminPreviewLoading, setAdminPreviewLoading] = useState(true);
+  const [passwordRecoveryMode, setPasswordRecoveryMode] = useState(
+    isPasswordRecoveryRedirect
+  );
   const [scanState, setScanState] = useState("idle");
   const [auditState, setAuditState] = useState("ready");
   const [serverAuditReport, setServerAuditReport] = useState(null);
@@ -426,6 +439,30 @@ function App() {
   }, [authSession]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    fetch("/api/admin-preview", { credentials: "include" })
+      .then((response) => {
+        if (!response.ok) throw new Error("Admin preview endpoint unavailable");
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setAdminPreviewSession(data.authenticated ? data.user : null);
+      })
+      .catch(() => {
+        if (!cancelled) setAdminPreviewSession(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAdminPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isSupabaseAuthConfigured || !supabase) {
       setAuthLoading(false);
       return undefined;
@@ -444,6 +481,12 @@ function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === "PASSWORD_RECOVERY") {
+        setPasswordRecoveryMode(true);
+      }
+      if (_event === "SIGNED_OUT") {
+        setPasswordRecoveryMode(false);
+      }
       setAuthSession(session);
       setAuthLoading(false);
     });
@@ -1115,8 +1158,16 @@ function App() {
   }
 
   async function signOut() {
-    if (supabase) await supabase.auth.signOut();
+    if (supabase && authSession) await supabase.auth.signOut();
+    if (adminPreviewSession) {
+      await fetch("/api/admin-preview", {
+        method: "DELETE",
+        credentials: "include",
+      }).catch(() => {});
+    }
     setAuthSession(null);
+    setAdminPreviewSession(null);
+    setPasswordRecoveryMode(false);
     showLanding();
   }
 
@@ -1130,12 +1181,36 @@ function App() {
     return <LandingPage onOpenApp={openProduct} />;
   }
 
-  if (authLoading) {
+  const hasWorkspaceAccess = Boolean(authSession || adminPreviewSession);
+  const workspaceUserEmail =
+    authSession?.user?.email || adminPreviewSession?.email || "Admin preview";
+
+  if (authLoading || adminPreviewLoading) {
     return <AuthLoading />;
   }
 
-  if (!isSupabaseAuthConfigured || !authSession) {
-    return <AuthPage onBack={showLanding} />;
+  if (!hasWorkspaceAccess) {
+    return (
+      <AuthPage
+        onAdminPreviewLogin={(user) => {
+          setAdminPreviewSession(user);
+          openProduct("audit");
+        }}
+        onBack={showLanding}
+      />
+    );
+  }
+
+  if (authSession && passwordRecoveryMode) {
+    return (
+      <PasswordUpdatePage
+        onCancel={signOut}
+        onComplete={() => {
+          setPasswordRecoveryMode(false);
+          openProduct("audit");
+        }}
+      />
+    );
   }
 
   return (
@@ -1208,9 +1283,9 @@ function App() {
               )}
               <span>{scanState === "running" ? "Running" : "Run monitor"}</span>
             </button>
-            <div className="user-pill" title={authSession.user.email || ""}>
+            <div className="user-pill" title={workspaceUserEmail}>
               <UserRound size={16} />
-              <span>{authSession.user.email}</span>
+              <span>{workspaceUserEmail}</span>
             </div>
             <button className="icon-button" onClick={signOut} title="Sign out">
               <LogOut size={18} />
@@ -1366,12 +1441,122 @@ function AuthLoading() {
   );
 }
 
-function AuthPage({ onBack }) {
+function PasswordUpdatePage({ onCancel, onComplete }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+
+    if (!supabase) {
+      setError("Supabase Auth is not configured yet.");
+      return;
+    }
+
+    if (password.length < 8) {
+      setError("Use a password with at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({
+        password,
+      });
+      if (updateError) throw updateError;
+      setNotice("Password updated. Opening your workspace.");
+      setPassword("");
+      setConfirmPassword("");
+      window.setTimeout(onComplete, 500);
+    } catch (authError) {
+      setError(
+        authError instanceof Error
+          ? authError.message
+          : "Password could not be updated."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="auth-screen">
+      <section className="auth-card">
+        <div className="auth-card-head">
+          <div className="brand-mark">
+            <Activity size={20} />
+          </div>
+          <div>
+            <p className="eyebrow">AEO Local</p>
+            <h1>Set your new password</h1>
+            <p>Choose a new password to finish account recovery.</p>
+          </div>
+        </div>
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label>
+            <span>New password</span>
+            <input
+              autoComplete="new-password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Minimum 8 characters"
+            />
+          </label>
+          <label>
+            <span>Confirm password</span>
+            <input
+              autoComplete="new-password"
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="Re-enter your password"
+            />
+          </label>
+
+          {error && <div className="auth-error">{error}</div>}
+          {notice && <div className="auth-success">{notice}</div>}
+
+          <button className="primary-button auth-submit" disabled={loading} type="submit">
+            {loading ? (
+              <RefreshCw className="spin" size={17} />
+            ) : (
+              <LockKeyhole size={17} />
+            )}
+            <span>{loading ? "Updating" : "Update password"}</span>
+          </button>
+        </form>
+
+        <div className="auth-switcher">
+          <button type="button" onClick={onCancel}>
+            Cancel and sign out
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function AuthPage({ onAdminPreviewLogin, onBack }) {
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [adminPasscode, setAdminPasscode] = useState("");
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminError, setAdminError] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [confirmationEmail, setConfirmationEmail] = useState("");
@@ -1456,6 +1641,42 @@ function AuthPage({ onBack }) {
     setError("");
     setNotice("");
     setConfirmationEmail("");
+  }
+
+  async function handleAdminPreviewSubmit(event) {
+    event.preventDefault();
+    setAdminError("");
+
+    if (!adminPasscode.trim()) {
+      setAdminError("Enter the admin preview passcode.");
+      return;
+    }
+
+    setAdminLoading(true);
+    try {
+      const response = await fetch("/api/admin-preview", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ passcode: adminPasscode }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Admin preview login failed.");
+      }
+      setAdminPasscode("");
+      onAdminPreviewLogin(data.user);
+    } catch (previewError) {
+      setAdminError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Admin preview login failed."
+      );
+    } finally {
+      setAdminLoading(false);
+    }
   }
 
   return (
@@ -1587,6 +1808,36 @@ function AuthPage({ onBack }) {
             </>
           )}
         </div>
+
+        <form className="admin-preview-panel" onSubmit={handleAdminPreviewSubmit}>
+          <div>
+            <strong>Temporary admin preview</strong>
+            <span>Use this while Supabase email login is being finished.</span>
+          </div>
+          <label>
+            <span>Admin passcode</span>
+            <input
+              autoComplete="off"
+              type="password"
+              value={adminPasscode}
+              onChange={(event) => setAdminPasscode(event.target.value)}
+              placeholder="Enter preview passcode"
+            />
+          </label>
+          {adminError && <div className="auth-error">{adminError}</div>}
+          <button
+            className="secondary-button admin-preview-submit"
+            disabled={adminLoading}
+            type="submit"
+          >
+            {adminLoading ? (
+              <RefreshCw className="spin" size={17} />
+            ) : (
+              <LockKeyhole size={17} />
+            )}
+            <span>{adminLoading ? "Opening" : "Open admin panel"}</span>
+          </button>
+        </form>
       </section>
     </main>
   );

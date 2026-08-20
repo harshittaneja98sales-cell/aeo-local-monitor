@@ -1101,6 +1101,50 @@ button {
   margin-top: 4px;
 }
 
+.admin-preview-panel {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.admin-preview-panel > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-preview-panel strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.admin-preview-panel span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-preview-panel label {
+  display: grid;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-preview-panel input {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.admin-preview-submit {
+  min-height: 44px;
+  justify-content: center;
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }
