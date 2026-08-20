@@ -2371,6 +2371,13 @@ button {
   font-size: 12px;
 }
 
+.prompt-raw-answer-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .prompt-raw-answer {
   border: 1px solid #d9e0e8;
   border-radius: 8px;
@@ -2404,6 +2411,13 @@ button {
 
 .prompt-raw-head > strong {
   font-size: 13px;
+}
+
+.prompt-raw-model {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .prompt-raw-answer pre {

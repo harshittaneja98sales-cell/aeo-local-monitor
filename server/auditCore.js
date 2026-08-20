@@ -10,11 +10,36 @@ import {
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
 const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4.1-mini";
+const DEFAULT_OPENROUTER_PERPLEXITY_MODEL = "perplexity/sonar";
+const DEFAULT_OPENROUTER_GEMINI_MODEL = "google/gemini-3-flash-preview";
 const OPENROUTER_CHAT_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 const MAX_EXTRA_PAGES = 3;
 const FETCH_TIMEOUT_MS = 9000;
 const OPENROUTER_PROMPT_TIMEOUT_MS = 12000;
+const openRouterLiveEngineConfigs = [
+  {
+    engineId: "chatgpt-search",
+    provider: "OpenRouter ChatGPT-style search",
+    providerLabel: "OpenRouter GPT Search",
+    modelEnvKey: "OPENROUTER_CHATGPT_MODEL",
+    defaultModel: DEFAULT_OPENROUTER_MODEL,
+  },
+  {
+    engineId: "perplexity",
+    provider: "OpenRouter Perplexity Sonar",
+    providerLabel: "OpenRouter Sonar",
+    modelEnvKey: "OPENROUTER_PERPLEXITY_MODEL",
+    defaultModel: DEFAULT_OPENROUTER_PERPLEXITY_MODEL,
+  },
+  {
+    engineId: "gemini",
+    provider: "OpenRouter Gemini",
+    providerLabel: "OpenRouter Gemini",
+    modelEnvKey: "OPENROUTER_GEMINI_MODEL",
+    defaultModel: DEFAULT_OPENROUTER_GEMINI_MODEL,
+  },
+];
 const businessTypeInferenceSignals = [
   {
     id: "pest-control",
@@ -123,21 +148,22 @@ export async function runServerAudit(payload = {}, env = process.env) {
         liveResults: openRouterBatch.results,
         websiteScan,
         entityGaps,
-        mode: "openrouter-web-search",
+        mode: "openrouter-multi-model-search",
         providerStatus: [
           {
-            provider: "OpenRouter web search",
+            provider: "OpenRouter multi-model search",
             status: openRouterStatus,
             detail:
               openRouterBatch.failedCount > 0
-                ? `${openRouterSuccessCount}/${openRouterBatch.results.length} ChatGPT-style rows used grounded OpenRouter output; slow rows used simulator fallback.`
-                : "ChatGPT-style rows use grounded OpenRouter output with web search.",
+                ? `${openRouterSuccessCount}/${openRouterBatch.results.length} rows returned raw OpenRouter output; failed rows used simulator fallback.`
+                : "ChatGPT-style, Perplexity/Sonar, and Gemini rows use OpenRouter with web search.",
           },
+          ...buildOpenRouterProviderStatus(openRouterBatch),
           {
-            provider: "Perplexity, Gemini, Google AI Overviews",
-            status: "simulated",
+            provider: "Google AI Overviews",
+            status: "estimated",
             detail:
-              "Direct provider connectors are not enabled yet, so those rows remain modeled.",
+              "Actual Google AI Overview SERP output needs a SERP provider such as DataForSEO; this row is still estimated.",
           },
         ],
       });
@@ -236,7 +262,6 @@ function buildLiveAudit({
   providerStatus,
 }) {
   const results = simulatedAudit.results.map((result) => {
-    if (result.engineId !== "chatgpt-search") return result;
     return liveResults.find((liveResult) => liveResult.id === result.id) || result;
   });
 
@@ -1150,9 +1175,22 @@ async function runOpenRouterSearchAudit({
   env,
   openRouterApiKey,
 }) {
+  const configByEngineId = new Map(
+    openRouterLiveEngineConfigs.map((config) => [
+      config.engineId,
+      {
+        ...config,
+        model:
+          env[config.modelEnvKey] ||
+          (config.engineId === "chatgpt-search" ? env.OPENROUTER_MODEL : "") ||
+          config.defaultModel,
+      },
+    ])
+  );
   const prompts = simulatedResults
-    .filter((result) => result.engineId === "chatgpt-search")
+    .filter((result) => configByEngineId.has(result.engineId))
     .map((result) => ({
+      engineConfig: configByEngineId.get(result.engineId),
       prompt: {
         id: result.promptId,
         query: result.query,
@@ -1174,32 +1212,77 @@ async function runOpenRouterSearchAudit({
             prompt: item.prompt,
             fallback: item.fallback,
             websiteScan,
+            engineConfig: item.engineConfig,
           }),
+          engineConfig: item.engineConfig,
         };
       } catch (error) {
         return {
           status: "rejected",
           value: buildPromptFallbackResult({
             fallback: item.fallback,
-            providerLabel: "OpenRouter web search",
+            providerLabel: item.engineConfig.providerLabel,
+            providerModel: item.engineConfig.model,
             error,
           }),
+          engineConfig: item.engineConfig,
         };
       }
     })
   );
   const failedCount = settled.filter((item) => item.status === "rejected").length;
+  const providerTotals = openRouterLiveEngineConfigs.map((config) => {
+    const attempts = settled.filter(
+      (item) => item.engineConfig.engineId === config.engineId
+    );
+    const failures = attempts.filter((item) => item.status === "rejected").length;
+    return {
+      provider: config.provider,
+      providerLabel: config.providerLabel,
+      model: configByEngineId.get(config.engineId)?.model || config.defaultModel,
+      total: attempts.length,
+      failedCount: failures,
+      successCount: attempts.length - failures,
+    };
+  });
 
   return {
     results: settled.map((item) => item.value),
     failedCount,
+    providerTotals,
   };
 }
 
-function buildPromptFallbackResult({ fallback, providerLabel, error }) {
+function buildOpenRouterProviderStatus(batch) {
+  return batch.providerTotals.map((total) => {
+    const status =
+      total.failedCount === 0
+        ? "live"
+        : total.successCount > 0
+          ? "partial"
+          : "fallback";
+    return {
+      provider: total.provider,
+      status,
+      detail:
+        total.failedCount > 0
+          ? `${total.successCount}/${total.total} prompt rows returned raw answers via ${total.model}; failed rows used estimates.`
+          : `${total.total}/${total.total} prompt rows returned raw answers via ${total.model}.`,
+    };
+  });
+}
+
+function buildPromptFallbackResult({
+  fallback,
+  providerLabel,
+  providerModel,
+  error,
+}) {
   return {
     ...fallback,
     providerMode: "live-provider-prompt-fallback",
+    providerLabel,
+    providerModel,
     responseExcerpt: "",
     finding: `${providerLabel} did not return a usable answer for this prompt, so this row used simulator scoring. ${fallback.finding}`,
     providerError: getErrorMessage(error, "Provider prompt failed."),
@@ -1213,14 +1296,19 @@ async function runOpenRouterPrompt({
   prompt,
   fallback,
   websiteScan,
+  engineConfig,
 }) {
   const response = await createOpenRouterChatCompletion(env, openRouterApiKey, {
-    model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
+    model: engineConfig.model,
     messages: [
       {
         role: "system",
-        content:
-          "You audit local AI answer visibility. Answer naturally with current web evidence. Include source URLs when available.",
+        content: [
+          "You audit local AI answer visibility.",
+          `You are producing the ${engineConfig.providerLabel} row for this SaaS audit.`,
+          "Answer naturally with current web evidence. Include source URLs when available.",
+          "Do not force the target business into the answer unless the evidence supports it.",
+        ].join(" "),
       },
       {
         role: "user",
@@ -1235,8 +1323,9 @@ async function runOpenRouterPrompt({
     outputText,
     request,
     fallback,
-    providerMode: "live-openrouter-web-search",
-    providerLabel: "OpenRouter web search",
+    providerMode: `live-openrouter-${engineConfig.engineId}`,
+    providerLabel: engineConfig.providerLabel,
+    providerModel: engineConfig.model,
   });
 }
 
@@ -1263,6 +1352,7 @@ function buildLivePromptResult({
   fallback,
   providerMode,
   providerLabel,
+  providerModel,
 }) {
   const urls = extractUrlsFromResponse(response).concat(extractUrlsFromText(outputText));
   const uniqueUrls = [...new Set(urls)];
@@ -1289,6 +1379,8 @@ function buildLivePromptResult({
     competitorRecommendations,
     confidence: cited ? 88 : mentioned ? 76 : 62,
     providerMode,
+    providerLabel,
+    providerModel,
     responseExcerpt: outputText.slice(0, 700),
     finding: buildLiveFinding({
       mentioned,

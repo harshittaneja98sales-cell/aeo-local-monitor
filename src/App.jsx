@@ -2547,6 +2547,7 @@ function Overview({
 
 function getAuditModeLabel(mode) {
   if (mode === "server-running") return "Live audit running";
+  if (mode === "openrouter-multi-model-search") return "Live OpenRouter models";
   if (mode === "openrouter-web-search") return "Live OpenRouter";
   if (mode === "openai-web-search") return "Live OpenAI";
   if (mode === "openai-error-fallback") return "OpenAI fallback";
@@ -2558,6 +2559,9 @@ function getAuditModeLabel(mode) {
 function getAuditModeNotice(mode) {
   if (mode === "server-running") {
     return "The server is crawling the brand website and checking live AI search results.";
+  }
+  if (mode === "openrouter-multi-model-search") {
+    return "ChatGPT-style, Perplexity/Sonar, and Gemini rows are using live OpenRouter web-search output; Google AI Overview is estimated until a SERP connector is added.";
   }
   if (mode === "openrouter-web-search") {
     return "ChatGPT-style rows are using live OpenRouter web-search output; the remaining providers are still estimated.";
@@ -2664,8 +2668,10 @@ function getMonitorAlertTypeLabel(type) {
 }
 
 function isLiveProviderResult(result) {
-  return ["live-openrouter-web-search", "live-openai-web-search"].includes(
-    result.providerMode
+  const providerMode = String(result?.providerMode || "");
+  return (
+    providerMode.startsWith("live-openrouter-") ||
+    providerMode === "live-openai-web-search"
   );
 }
 
@@ -3534,7 +3540,7 @@ function AiAudit({
   const modeledRows = Math.max(0, results.length - liveRows - fallbackRows);
   const matrixExplainer =
     liveRows > 0
-      ? "Red means the answer did not mention or cite this business. Live chips come from connected AI search output; estimate chips are forecast rows for providers we have not connected directly yet."
+      ? "Red means the answer did not mention or cite this business. Live chips come from OpenRouter-backed AI search output; estimate chips are forecast rows, currently used for Google AI Overview until a SERP connector is added."
       : "This run is showing estimates only. Red means the audit predicts the business will be skipped for that prompt. Raw answer text appears only when a connected live provider returns a response.";
   const matrixStatus = [
     `${liveRows} live`,
@@ -3785,9 +3791,6 @@ function AiAudit({
               (result) =>
                 isLiveProviderResult(result) || isProviderFallbackResult(result)
             );
-            const rawAnswerResult =
-              livePromptResults[0] ||
-              promptResults.find((result) => result.engineId === "chatgpt-search");
 
             return (
               <article className="prompt-card" key={prompt.id}>
@@ -3815,7 +3818,7 @@ function AiAudit({
                     </span>
                   ))}
                 </div>
-                <PromptRawAnswer result={rawAnswerResult} />
+                <PromptRawAnswers results={livePromptResults} />
               </article>
             );
           })}
@@ -4170,6 +4173,21 @@ function GooglePlaceMiniCard({ place, actionLabel, onAction }) {
   );
 }
 
+function PromptRawAnswers({ results = [] }) {
+  const visibleResults = results.filter(
+    (result) => isLiveProviderResult(result) || isProviderFallbackResult(result)
+  );
+  if (visibleResults.length === 0) return null;
+
+  return (
+    <div className="prompt-raw-answer-stack">
+      {visibleResults.map((result) => (
+        <PromptRawAnswer result={result} key={result.id} />
+      ))}
+    </div>
+  );
+}
+
 function PromptRawAnswer({ result }) {
   const isLive = result && isLiveProviderResult(result);
   const isFallback = result && isProviderFallbackResult(result);
@@ -4177,6 +4195,9 @@ function PromptRawAnswer({ result }) {
   if (!rawText && !isLive && !isFallback) return null;
 
   const statusLabel = result ? getResultOutcomeLabel(result) : "Unavailable";
+  const providerName =
+    result?.providerLabel || getEngineChipName(result?.engine) || "Provider";
+  const providerModel = result?.providerModel ? ` (${result.providerModel})` : "";
   const body = rawText
     ? rawText
     : isFallback
@@ -4193,7 +4214,11 @@ function PromptRawAnswer({ result }) {
       }`}
     >
       <div className="prompt-raw-head">
-        <strong>{rawText ? "Raw live answer" : "Raw answer"}</strong>
+        <strong>
+          {rawText
+            ? `${providerName} raw answer`
+            : `${providerName} answer unavailable`}
+        </strong>
         {result && (
           <span className={getResultChipClass(result)}>
             <span>{statusLabel}</span>
@@ -4201,6 +4226,7 @@ function PromptRawAnswer({ result }) {
           </span>
         )}
       </div>
+      {providerModel && <small className="prompt-raw-model">{providerModel}</small>}
       <pre>{body}</pre>
       <small>
         {result?.source
