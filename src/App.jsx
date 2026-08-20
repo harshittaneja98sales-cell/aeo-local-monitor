@@ -1807,10 +1807,10 @@ function getAuditModeNotice(mode) {
     return "The server is crawling the brand website and checking live AI search results.";
   }
   if (mode === "openrouter-web-search") {
-    return "ChatGPT-style rows are using live OpenRouter web-search output; the remaining providers are still modeled.";
+    return "ChatGPT-style rows are using live OpenRouter web-search output; the remaining providers are still estimated.";
   }
   if (mode === "openai-web-search") {
-    return "ChatGPT with Search rows are using live OpenAI web-search output; the remaining providers are still modeled.";
+    return "ChatGPT with Search rows are using live OpenAI web-search output; the remaining providers are still estimated.";
   }
   if (mode === "live-provider-error-fallback") {
     return "A live provider was configured, but the request failed, so this run used fallback scoring.";
@@ -1923,7 +1923,7 @@ function isProviderFallbackResult(result) {
 function getResultProviderLabel(result) {
   if (isLiveProviderResult(result)) return "Live";
   if (isProviderFallbackResult(result)) return "Fallback";
-  return "Modeled";
+  return "Estimate";
 }
 
 function getResultProviderClass(result) {
@@ -2778,9 +2778,13 @@ function AiAudit({
   const liveRows = results.filter(isLiveProviderResult).length;
   const fallbackRows = results.filter(isProviderFallbackResult).length;
   const modeledRows = Math.max(0, results.length - liveRows - fallbackRows);
+  const matrixExplainer =
+    liveRows > 0
+      ? "Red means the answer did not mention or cite this business. Live chips come from connected AI search output; estimate chips are forecast rows for providers we have not connected directly yet."
+      : "This run is showing estimates only. Red means the audit predicts the business will be skipped for that prompt. Raw answer text appears only when a connected live provider returns a response.";
   const matrixStatus = [
     `${liveRows} live`,
-    `${modeledRows} modeled`,
+    `${modeledRows} estimated`,
     fallbackRows > 0 ? `${fallbackRows} fallback` : "",
   ]
     .filter(Boolean)
@@ -2979,9 +2983,7 @@ function AiAudit({
         </div>
         {modeledRows > 0 && (
           <div className="audit-explainer">
-            Only ChatGPT with Search is live right now. Red live chips mean the
-            live answer skipped the business; modeled chips are forecast rows for
-            providers that are not connected yet.
+            {matrixExplainer}
           </div>
         )}
         <div className="prompt-card-grid">
@@ -3380,6 +3382,8 @@ function PromptRawAnswer({ result }) {
   const isLive = result && isLiveProviderResult(result);
   const isFallback = result && isProviderFallbackResult(result);
   const rawText = String(result?.responseExcerpt || "").trim();
+  if (!rawText && !isLive && !isFallback) return null;
+
   const statusLabel = result ? getResultOutcomeLabel(result) : "Unavailable";
   const body = rawText
     ? rawText
@@ -3388,7 +3392,7 @@ function PromptRawAnswer({ result }) {
         "The live provider request fell back before returning raw answer text."
       : isLive
         ? "The live provider returned no raw answer text for this prompt."
-        : "Raw provider text is not available for modeled rows.";
+        : "Raw provider text is not available for estimate rows.";
 
   return (
     <article
