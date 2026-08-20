@@ -101,6 +101,55 @@ const defaultMonitorSummary = {
   competitors: 0,
 };
 const AUDIT_CLIENT_TIMEOUT_MS = 35000;
+const websiteBusinessTypeSignals = [
+  {
+    id: "pest-control",
+    patterns: [
+      /\borkin\b/i,
+      /\bterminix\b/i,
+      /\bpest(?:s)?\b/i,
+      /\btermite(?:s)?\b/i,
+      /\bexterminat(?:e|or|ion)\b/i,
+      /\bmosquito(?:es)?\b/i,
+      /\brodent(?:s)?\b/i,
+      /\bbed[-\s]?bug(?:s)?\b/i,
+      /\bcockroach(?:es)?\b/i,
+    ],
+  },
+  {
+    id: "plumbing",
+    patterns: [
+      /\bplumb(?:er|ers|ing)?\b/i,
+      /\bwater[-\s]?heater\b/i,
+      /\bdrain[-\s]?cleaning\b/i,
+      /\bleak[-\s]?repair\b/i,
+    ],
+  },
+  {
+    id: "hvac",
+    patterns: [/\bhvac\b/i, /\bac[-\s]?repair\b/i, /\bair[-\s]?conditioning\b/i],
+  },
+  {
+    id: "automotive",
+    patterns: [/\bused[-\s]?cars?\b/i, /\bauto[-\s]?sales\b/i, /\bdealership\b/i],
+  },
+  {
+    id: "dentistry",
+    patterns: [/\bdentist(?:ry)?\b/i, /\bdental\b/i, /\borthodontic\b/i],
+  },
+  {
+    id: "restaurant",
+    patterns: [/\brestaurant\b/i, /\bdining\b/i, /\breservation(?:s)?\b/i],
+  },
+  {
+    id: "salon",
+    patterns: [/\bsalon\b/i, /\bhaircut(?:s)?\b/i, /\bbalayage\b/i],
+  },
+  {
+    id: "law",
+    patterns: [/\blaw[-\s]?firm\b/i, /\battorney\b/i, /\blawyer\b/i],
+  },
+];
 
 function createEmptyProfile(selectedBusinessType = "plumbing") {
   const businessType =
@@ -126,10 +175,15 @@ function createEmptyProfile(selectedBusinessType = "plumbing") {
 function getInitialWorkspace() {
   const fallbackType = "plumbing";
   const saved = readStoredWorkspace();
-  const selectedBusinessType =
+  const storedBusinessType =
     saved?.selectedBusinessType && businessTemplates[saved.selectedBusinessType]
       ? saved.selectedBusinessType
       : fallbackType;
+  const inferredBusinessType = inferBusinessTypeIdFromWebsite(saved?.profile?.website);
+  const selectedBusinessType =
+    inferredBusinessType && inferredBusinessType !== storedBusinessType
+      ? inferredBusinessType
+      : storedBusinessType;
   const templateType =
     businessTypes.find((type) => type.id === selectedBusinessType) ||
     businessTypes[0];
@@ -137,13 +191,20 @@ function getInitialWorkspace() {
     Boolean(saved?.businessId) ||
     Boolean(saved?.profile?.website) ||
     Boolean(saved?.profile?.name);
+  const profile = hasSavedBusiness
+    ? { ...createEmptyProfile(selectedBusinessType), ...saved?.profile }
+    : createEmptyProfile(selectedBusinessType);
+
+  if (inferredBusinessType && inferredBusinessType !== storedBusinessType) {
+    profile.businessType = templateType.label;
+    profile.category = templateType.categoryTerm;
+    profile.services = templateType.highIntentService;
+  }
 
   return {
     businessId: saved?.businessId || null,
     selectedBusinessType,
-    profile: hasSavedBusiness
-      ? { ...createEmptyProfile(selectedBusinessType), ...saved?.profile }
-      : createEmptyProfile(selectedBusinessType),
+    profile,
     competitors: saved?.competitors || [
       templateType.competitorA,
       templateType.competitorB,
@@ -242,6 +303,74 @@ function inferBusinessNameFromWebsite(value) {
   } catch {
     return "";
   }
+}
+
+function inferBusinessTypeIdFromWebsite(value) {
+  const normalized = normalizeWebsiteInput(value);
+  if (!normalized) return "";
+
+  const haystack = normalized
+    .replace(/^https?:\/\//i, "")
+    .replace(/[-_/?.=&]+/g, " ");
+  const matched = websiteBusinessTypeSignals.find((signal) =>
+    signal.patterns.some((pattern) => pattern.test(haystack))
+  );
+
+  return matched?.id || "";
+}
+
+function findBusinessTypeById(id) {
+  return businessTypes.find((type) => type.id === id);
+}
+
+function resolveBusinessTypeIdFromAudit({
+  profile,
+  businessTypeSnapshot,
+  fallbackId,
+}) {
+  const snapshotId = businessTypeSnapshot?.id;
+  if (snapshotId && businessTemplates[snapshotId]) return snapshotId;
+
+  const websiteId = inferBusinessTypeIdFromWebsite(profile?.website);
+  if (websiteId && businessTemplates[websiteId]) return websiteId;
+
+  const profileType = normalizeAuditKeyValue(profile?.businessType);
+  const profileCategory = normalizeAuditKeyValue(profile?.category);
+  const matchedType = businessTypes.find(
+    (type) =>
+      normalizeAuditKeyValue(type.label) === profileType ||
+      profileCategory.includes(normalizeAuditKeyValue(type.categoryTerm))
+  );
+
+  return matchedType?.id || fallbackId;
+}
+
+function applyBusinessTypeToProfile(profile, businessType) {
+  if (!businessType) return profile;
+  const categoryLooksDifferent =
+    String(profile.category || "").trim() &&
+    websiteBusinessTypeSignals.some((signal) => {
+      if (signal.id === businessType.id) return false;
+      return signal.patterns.some((pattern) => pattern.test(profile.category || ""));
+    });
+  const shouldReplaceServices =
+    !String(profile.services || "").trim() ||
+    websiteBusinessTypeSignals.some((signal) => {
+      if (signal.id === businessType.id) return false;
+      return signal.patterns.some((pattern) => pattern.test(profile.services || ""));
+    });
+
+  return {
+    ...profile,
+    businessType: businessType.label,
+    category:
+      !String(profile.category || "").trim() || categoryLooksDifferent
+        ? businessType.categoryTerm
+        : profile.category,
+    services: shouldReplaceServices
+      ? businessType.highIntentService
+      : profile.services,
+  };
 }
 
 function buildWebsiteOnlyAuditProfile(profile, website, businessType) {
@@ -638,13 +767,7 @@ function App() {
         businessId: null,
         selectedBusinessType: typeId,
         profile: hasCurrentProfile
-          ? {
-              ...current.profile,
-              businessType: nextType?.label || current.profile.businessType,
-              category: current.profile.category || nextType?.categoryTerm || "",
-              services:
-                current.profile.services || nextType?.highIntentService || "",
-            }
+          ? applyBusinessTypeToProfile(current.profile, nextType)
           : createEmptyProfile(typeId),
         competitors: nextType ? [nextType.competitorA, nextType.competitorB] : [],
         monitoredLocations: hasCurrentProfile ? current.monitoredLocations : [],
@@ -671,6 +794,27 @@ function App() {
     setAuditState((current) => (current === "running" ? current : "ready"));
   }
 
+  function applyDetectedBusinessType(typeId, nextProfile) {
+    const nextType = findBusinessTypeById(typeId);
+    if (!nextType) return;
+
+    resetAuditResult();
+    setWorkspace((current) => ({
+      ...current,
+      businessId:
+        normalizeAuditKeyValue(current.profile.website) ===
+        normalizeAuditKeyValue(nextProfile?.website)
+          ? current.businessId
+          : null,
+      selectedBusinessType: nextType.id,
+      profile: applyBusinessTypeToProfile(nextProfile || current.profile, nextType),
+      competitors: [nextType.competitorA, nextType.competitorB],
+    }));
+    setSelectedTask(
+      businessTemplates[nextType.id]?.remediationTasks[0] || selectedTask
+    );
+  }
+
   function runScan() {
     if (scanState === "running") return;
     setScanState("running");
@@ -684,7 +828,15 @@ function App() {
         ? options.profile
         : profile;
     const payload = buildServerPayload(
-      { smartInputMode: options?.smartInputMode || "" },
+      {
+        smartInputMode: options?.smartInputMode || "",
+        ...(options?.businessType
+          ? {
+              businessType: options.businessType,
+              selectedBusinessType: options.businessType.id,
+            }
+          : {}),
+      },
       { profile: overrideProfile }
     );
     const controller = new AbortController();
@@ -718,16 +870,30 @@ function App() {
         overrideProfile,
         data.audit.profileSnapshot
       );
-      const finalAuditInputKey = buildAuditInputKey({
+      const detectedBusinessTypeId = resolveBusinessTypeIdFromAudit({
         profile: finalAuditProfile,
-        selectedBusinessType,
+        businessTypeSnapshot: data.audit.businessTypeSnapshot,
+        fallbackId: payload.selectedBusinessType || selectedBusinessType,
+      });
+      const detectedBusinessType =
+        findBusinessTypeById(detectedBusinessTypeId) ||
+        findBusinessTypeById(selectedBusinessType);
+      const normalizedFinalAuditProfile = applyBusinessTypeToProfile(
+        finalAuditProfile,
+        detectedBusinessType
+      );
+      const finalAuditInputKey = buildAuditInputKey({
+        profile: normalizedFinalAuditProfile,
+        selectedBusinessType: detectedBusinessTypeId,
         competitors,
         monitoredLocations,
       });
 
       setServerAuditReport({
         ...data.audit,
-        profileSnapshot: finalAuditProfile,
+        profileSnapshot: normalizedFinalAuditProfile,
+        businessTypeSnapshot:
+          data.audit.businessTypeSnapshot || detectedBusinessType,
         auditInputKey: finalAuditInputKey,
       });
       setAuditMode(data.audit.mode || data.mode || "server");
@@ -737,8 +903,23 @@ function App() {
         setWorkspace((current) => ({
           ...current,
           businessId: data.business?.id || current.businessId,
-          profile: finalAuditProfile,
+          selectedBusinessType: detectedBusinessTypeId,
+          competitors:
+            detectedBusinessTypeId !== current.selectedBusinessType &&
+            detectedBusinessType
+              ? [
+                  detectedBusinessType.competitorA,
+                  detectedBusinessType.competitorB,
+                ]
+              : current.competitors,
+          profile: normalizedFinalAuditProfile,
         }));
+        if (detectedBusinessTypeId !== selectedBusinessType) {
+          setSelectedTask(
+            businessTemplates[detectedBusinessTypeId]?.remediationTasks[0] ||
+              selectedTask
+          );
+        }
       }
       if (data.auditRun) {
         setSavedAuditRuns((current) =>
@@ -1319,6 +1500,7 @@ function App() {
             selectedBusinessType={selectedBusinessType}
             businessTypes={businessTypes}
             onBusinessTypeChange={changeBusinessType}
+            onDetectedBusinessTypeChange={applyDetectedBusinessType}
             auditReport={auditReport}
             auditState={auditState}
             auditMode={auditMode}
@@ -3309,6 +3491,7 @@ function AiAudit({
   selectedBusinessType,
   businessTypes,
   onBusinessTypeChange,
+  onDetectedBusinessTypeChange,
   auditReport,
   auditState,
   auditMode,
@@ -3373,17 +3556,36 @@ function AiAudit({
     );
     const nextWebsite = normalizeAuditKeyValue(normalizedWebsite);
     const websiteChanged = currentWebsite !== nextWebsite;
+    const inferredBusinessTypeId = inferBusinessTypeIdFromWebsite(normalizedWebsite);
+    const auditBusinessType =
+      findBusinessTypeById(inferredBusinessTypeId) || selectedType;
     const nextProfile = websiteChanged
-      ? buildWebsiteOnlyAuditProfile(profile, normalizedWebsite, selectedType)
+      ? buildWebsiteOnlyAuditProfile(profile, normalizedWebsite, auditBusinessType)
       : { ...profile, website: normalizedWebsite };
+    const normalizedNextProfile = applyBusinessTypeToProfile(
+      nextProfile,
+      auditBusinessType
+    );
 
-    if (websiteChanged || normalizedWebsite !== profile.website) {
-      setProfile(nextProfile);
+    if (
+      websiteChanged ||
+      normalizedWebsite !== profile.website ||
+      auditBusinessType?.id !== selectedBusinessType
+    ) {
+      if (auditBusinessType?.id && auditBusinessType.id !== selectedBusinessType) {
+        onDetectedBusinessTypeChange?.(
+          auditBusinessType.id,
+          normalizedNextProfile
+        );
+      } else {
+        setProfile(normalizedNextProfile);
+      }
     }
 
     onRunAudit({
-      profile: nextProfile,
+      profile: normalizedNextProfile,
       smartInputMode: "website-only",
+      businessType: auditBusinessType,
     });
   }
 

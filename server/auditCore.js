@@ -15,6 +15,73 @@ const OPENROUTER_CHAT_COMPLETIONS_URL =
 const MAX_EXTRA_PAGES = 3;
 const FETCH_TIMEOUT_MS = 9000;
 const OPENROUTER_PROMPT_TIMEOUT_MS = 12000;
+const businessTypeInferenceSignals = [
+  {
+    id: "pest-control",
+    keywords: [
+      "orkin",
+      "terminix",
+      "pest control",
+      "pests",
+      "termite",
+      "exterminator",
+      "extermination",
+      "mosquito",
+      "rodent",
+      "bed bug",
+      "cockroach",
+      "ant control",
+      "wildlife control",
+    ],
+  },
+  {
+    id: "plumbing",
+    keywords: [
+      "plumbing",
+      "plumber",
+      "water heater",
+      "drain cleaning",
+      "leak repair",
+      "sewer line",
+    ],
+  },
+  {
+    id: "hvac",
+    keywords: [
+      "hvac",
+      "ac repair",
+      "air conditioning",
+      "heating repair",
+      "furnace",
+    ],
+  },
+  {
+    id: "automotive",
+    keywords: [
+      "used cars",
+      "auto sales",
+      "car dealership",
+      "vehicle financing",
+      "pre-owned",
+    ],
+  },
+  {
+    id: "dentistry",
+    keywords: ["dentist", "dentistry", "dental", "orthodontic", "teeth"],
+  },
+  {
+    id: "restaurant",
+    keywords: ["restaurant", "dining", "reservations", "menu", "catering"],
+  },
+  {
+    id: "salon",
+    keywords: ["salon", "haircut", "balayage", "hair color", "stylist"],
+  },
+  {
+    id: "law",
+    keywords: ["law firm", "attorney", "lawyer", "legal", "personal injury"],
+  },
+];
 
 export async function runServerAudit(payload = {}, env = process.env) {
   let request = normalizeAuditPayload(payload);
@@ -23,6 +90,7 @@ export async function runServerAudit(payload = {}, env = process.env) {
   const simulatedAudit = {
     ...runLocalAiAudit(request),
     profileSnapshot: request.profile,
+    businessTypeSnapshot: request.businessType,
   };
   const openRouterApiKey = getOpenRouterApiKey(env);
   const openAiApiKey = getOpenAiApiKey(env);
@@ -307,6 +375,13 @@ function findInternalCrawlTargets(html, baseUrl, request) {
       "areas",
       "faq",
       "reviews",
+      "pest",
+      "pests",
+      "termite",
+      "exterminator",
+      "mosquito",
+      "rodent",
+      "bed-bug",
     ])
     .map((term) => term.toLowerCase())
     .filter(Boolean);
@@ -359,6 +434,12 @@ function analyzeWebsitePages(pages, startUrl, request) {
     .join("\n/* AEO_JSON_LD_BLOCK */\n");
   const combinedRawText = pageSummaries.map((page) => page.text).join(" ");
   const combinedText = combinedRawText.toLowerCase();
+  const detectedBusinessType = inferBusinessTypeFromWebsiteContent({
+    startUrl,
+    pageSummaries,
+    combinedRawText,
+    combinedJsonLd,
+  });
   const extractedProfile = extractWebsiteProfile({
     pageSummaries,
     combinedJsonLd,
@@ -385,7 +466,7 @@ function analyzeWebsitePages(pages, startUrl, request) {
     title: pageSummaries[0]?.title || "",
     metaDescription: pageSummaries[0]?.metaDescription || "",
     hasLocalBusinessSchema:
-      /LocalBusiness|Plumber|Dentist|Restaurant|HairSalon|HVACBusiness|LegalService/i.test(
+      /LocalBusiness|Plumber|Dentist|Restaurant|HairSalon|HVACBusiness|LegalService|HomeAndConstructionBusiness|ProfessionalService|Pest/i.test(
         combinedJsonLd
       ),
     hasFAQSchema: /FAQPage|Question|acceptedAnswer/i.test(combinedJsonLd),
@@ -394,17 +475,28 @@ function analyzeWebsitePages(pages, startUrl, request) {
     hasSameAs: /"sameAs"/i.test(combinedJsonLd),
     hasPhone,
     detectedServices,
+    detectedBusinessTypeId: detectedBusinessType?.id || "",
+    detectedBusinessTypeLabel: detectedBusinessType?.label || "",
     extractedProfile,
     notes: buildWebsiteScanNotes({
       pagesScanned: pages.length,
       detectedServices,
       serviceTerms,
+      detectedBusinessType,
     }),
   };
 }
 
-function buildWebsiteScanNotes({ pagesScanned, detectedServices, serviceTerms }) {
+function buildWebsiteScanNotes({
+  pagesScanned,
+  detectedServices,
+  serviceTerms,
+  detectedBusinessType,
+}) {
   const notes = [`Scanned ${pagesScanned} owned page${pagesScanned === 1 ? "" : "s"}.`];
+  if (detectedBusinessType) {
+    notes.push(`Detected business type: ${detectedBusinessType.label}.`);
+  }
   if (serviceTerms.length > 0) {
     notes.push(
       `${detectedServices.length}/${serviceTerms.length} entered service terms were found in page text.`
@@ -413,16 +505,66 @@ function buildWebsiteScanNotes({ pagesScanned, detectedServices, serviceTerms })
   return notes;
 }
 
+function inferBusinessTypeFromWebsiteContent({
+  startUrl,
+  pageSummaries,
+  combinedRawText,
+  combinedJsonLd,
+}) {
+  const homepage = pageSummaries[0] || {};
+  const weightedSources = [
+    { value: startUrl, weight: 5 },
+    { value: homepage.title, weight: 4 },
+    { value: homepage.metaDescription, weight: 4 },
+    { value: combinedJsonLd, weight: 3 },
+    { value: String(combinedRawText || "").slice(0, 16000), weight: 1 },
+  ];
+  const scores = businessTypeInferenceSignals.map((signal) => {
+    const score = weightedSources.reduce((total, source) => {
+      const haystack = normalizeWhitespace(source.value).toLowerCase();
+      const matches = signal.keywords.filter((keyword) =>
+        haystack.includes(keyword.toLowerCase())
+      ).length;
+      return total + matches * source.weight;
+    }, 0);
+
+    return { id: signal.id, score };
+  });
+  const sortedScores = scores.sort((left, right) => right.score - left.score);
+  const [best, second] = sortedScores;
+
+  if (!best || best.score < 4 || best.score <= (second?.score || 0)) {
+    return null;
+  }
+
+  return businessTypes.find((type) => type.id === best.id) || null;
+}
+
+function shouldReplaceTypedField(value, detectedBusinessTypeId) {
+  const field = String(value || "").trim();
+  if (!field) return true;
+
+  return businessTypeInferenceSignals.some((signal) => {
+    if (signal.id === detectedBusinessTypeId) return false;
+    const haystack = field.toLowerCase();
+    return signal.keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
+  });
+}
+
 function enrichRequestFromWebsite(request, websiteScan) {
   if (websiteScan.status !== "scanned") return request;
 
   const extracted = websiteScan.extractedProfile || {};
   const websiteOnly = request.smartInputMode === "website-only";
+  const detectedBusinessType = businessTypes.find(
+    (type) => type.id === websiteScan.detectedBusinessTypeId
+  );
   const profile = request.profile || {};
   const nextProfile = {
     ...profile,
     website: websiteScan.url || profile.website,
   };
+  const nextBusinessType = detectedBusinessType || request.businessType;
   const fillableFields = [
     "name",
     "phone",
@@ -443,12 +585,29 @@ function enrichRequestFromWebsite(request, websiteScan) {
     nextProfile.services = extracted.services;
   }
 
+  if (detectedBusinessType) {
+    nextProfile.businessType = detectedBusinessType.label;
+    nextProfile.category = shouldReplaceTypedField(
+      nextProfile.category,
+      detectedBusinessType.id
+    )
+      ? detectedBusinessType.categoryTerm
+      : nextProfile.category;
+    nextProfile.services = shouldReplaceTypedField(
+      nextProfile.services,
+      detectedBusinessType.id
+    )
+      ? detectedBusinessType.highIntentService
+      : nextProfile.services;
+  }
+
   if (!String(nextProfile.name || "").trim()) {
     nextProfile.name = inferNameFromUrl(nextProfile.website);
   }
 
   return {
     ...request,
+    businessType: nextBusinessType,
     profile: nextProfile,
     sourceCompletion: Math.max(
       request.sourceCompletion || 0,
@@ -496,7 +655,7 @@ function extractStructuredBusinessProfile(jsonLd) {
   const items = parseJsonLdItems(jsonLd);
   const business = items.find((item) => {
     const type = Array.isArray(item["@type"]) ? item["@type"].join(" ") : item["@type"];
-    return /LocalBusiness|Organization|Dentist|Plumber|Restaurant|Store|AutomotiveBusiness|AutoDealer|LegalService|HairSalon|HVACBusiness/i.test(
+    return /LocalBusiness|Organization|Dentist|Plumber|Restaurant|Store|AutomotiveBusiness|AutoDealer|LegalService|HairSalon|HVACBusiness|HomeAndConstructionBusiness|ProfessionalService|Pest/i.test(
       String(type || "")
     );
   });
@@ -625,7 +784,7 @@ function extractPhoneFromText(text) {
 
 function extractAddressFromText(text) {
   const match = String(text || "").match(
-    /\b\d{2,6}\s+[a-z0-9.' -]+(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|way|court|ct|circle|cir|parkway|pkwy)\b[^.|\n]{0,90}\b[a-z .'-]+,\s*[a-z]{2}\s*\d{0,5}/i
+    /\b\d{2,6}\s+[a-z0-9.'-]+(?:\s+[a-z0-9.'-]+){0,7}\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|way|court|ct\.?|circle|cir\.?|parkway|pkwy\.?)\b[^.|\n]{0,90}\b[a-z .'-]+,\s*[a-z]{2}\s*\d{0,5}/i
   );
   return match ? normalizeWhitespace(match[0]) : "";
 }
@@ -642,7 +801,7 @@ function extractMarketFromText(text) {
   const source = normalizeWhitespace(text);
   const patterns = [
     /\b(?:serving|serves|service area|located in|based in|near|in)\s+([A-Z][A-Za-z .'-]{1,38}?),\s*([A-Z]{2})\b/g,
-    /\b([A-Z][A-Za-z .'-]{1,38}?),\s*([A-Z]{2})\s+(?:plumber|plumbing|dentist|dental|restaurant|lawyer|attorney|hvac|salon|auto|cars|dealer|dealership)\b/g,
+    /\b([A-Z][A-Za-z .'-]{1,38}?),\s*([A-Z]{2})\s+(?:plumber|plumbing|pest|exterminator|termite|dentist|dental|restaurant|lawyer|attorney|hvac|salon|auto|cars|dealer|dealership)\b/g,
   ];
 
   for (const pattern of patterns) {
@@ -667,6 +826,12 @@ function extractServicesFromMetadata(homepage, text) {
     "plumbing",
     "water heater",
     "drain cleaning",
+    "pest control",
+    "termite treatment",
+    "mosquito control",
+    "rodent removal",
+    "bed bug treatment",
+    "exterminator",
     "dentist",
     "dental",
     "emergency dental",
@@ -752,7 +917,7 @@ function isCleanMarket(value) {
   const market = String(value || "").trim();
   const [city = "", state = ""] = market.split(",").map((part) => part.trim());
   const rejectedWords =
-    /\b(?:about|blog|call|cleaning|contact|core|customer|drain|emergency|fast|heater|home|hours|plumber|plumbing|quality|reliable|repair|review|same|service|services|values|water|work)\b/i;
+    /\b(?:about|blog|call|cleaning|contact|core|customer|drain|emergency|exterminator|fast|heater|home|hours|mosquito|pest|plumber|plumbing|quality|reliable|repair|review|rodent|same|service|services|termite|values|water|work)\b/i;
 
   return (
     city.length >= 3 &&

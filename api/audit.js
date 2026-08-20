@@ -64,6 +64,9 @@ async function saveAuditHistory(body, audit) {
   const request = {
     ...body,
     profile: audit.profileSnapshot || body.profile,
+    businessType: audit.businessTypeSnapshot || body.businessType,
+    selectedBusinessType:
+      audit.businessTypeSnapshot?.id || body.selectedBusinessType,
   };
   const business = await upsertBusinessFromAudit(request);
   const auditRun = await saveAuditRun({
