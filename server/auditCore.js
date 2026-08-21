@@ -1312,6 +1312,7 @@ async function runOpenRouterPrompt({
           `You are producing the ${engineConfig.providerLabel} row for this SaaS audit.`,
           "Answer naturally with current web evidence. Include source URLs when available.",
           "Do not force the target business into the answer unless the evidence supports it.",
+          "Keep the answer concise: 80-120 words plus source URLs.",
         ].join(" "),
       },
       {
@@ -1430,6 +1431,7 @@ async function createOpenRouterChatCompletion(env, apiKey, request) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const body = {
     ...chatRequest,
+    max_tokens: parseIntegerEnv(env.OPENROUTER_MAX_TOKENS, 450, 120, 1200),
   };
   if (useSearchTool) {
     body.tools = [
@@ -1437,8 +1439,8 @@ async function createOpenRouterChatCompletion(env, apiKey, request) {
         type: "openrouter:web_search",
         parameters: {
           engine: env.OPENROUTER_SEARCH_ENGINE || "auto",
-          max_results: parseIntegerEnv(env.OPENROUTER_SEARCH_RESULTS, 4, 1, 8),
-          search_context_size: env.OPENROUTER_SEARCH_CONTEXT_SIZE || "medium",
+          max_results: parseIntegerEnv(env.OPENROUTER_SEARCH_RESULTS, 2, 1, 6),
+          search_context_size: env.OPENROUTER_SEARCH_CONTEXT_SIZE || "low",
         },
       },
     ];
@@ -1699,7 +1701,12 @@ function getOpenAiApiKey(env) {
 }
 
 function getErrorMessage(error, fallback = "Provider request failed.") {
-  if (error instanceof Error && error.message) return error.message;
+  if (error instanceof Error && error.message) {
+    if (/OpenRouter HTTP 402|Insufficient credits/i.test(error.message)) {
+      return "OpenRouter credits are exhausted. Add credits at https://openrouter.ai/settings/credits, then run the audit again.";
+    }
+    return error.message;
+  }
   return `${fallback} No provider response could be parsed.`;
 }
 
