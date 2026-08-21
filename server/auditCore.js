@@ -24,6 +24,7 @@ const openRouterLiveEngineConfigs = [
     providerLabel: "OpenRouter GPT Search",
     modelEnvKey: "OPENROUTER_CHATGPT_MODEL",
     defaultModel: DEFAULT_OPENROUTER_MODEL,
+    useSearchTool: true,
   },
   {
     engineId: "perplexity",
@@ -31,6 +32,7 @@ const openRouterLiveEngineConfigs = [
     providerLabel: "OpenRouter Sonar",
     modelEnvKey: "OPENROUTER_PERPLEXITY_MODEL",
     defaultModel: DEFAULT_OPENROUTER_PERPLEXITY_MODEL,
+    useSearchTool: false,
   },
   {
     engineId: "gemini",
@@ -38,6 +40,7 @@ const openRouterLiveEngineConfigs = [
     providerLabel: "OpenRouter Gemini",
     modelEnvKey: "OPENROUTER_GEMINI_MODEL",
     defaultModel: DEFAULT_OPENROUTER_GEMINI_MODEL,
+    useSearchTool: true,
   },
 ];
 const businessTypeInferenceSignals = [
@@ -1300,6 +1303,7 @@ async function runOpenRouterPrompt({
 }) {
   const response = await createOpenRouterChatCompletion(env, openRouterApiKey, {
     model: engineConfig.model,
+    useSearchTool: engineConfig.useSearchTool,
     messages: [
       {
         role: "system",
@@ -1318,6 +1322,9 @@ async function runOpenRouterPrompt({
     temperature: 0.2,
   });
   const outputText = extractChatCompletionText(response);
+  if (!outputText.trim()) {
+    throw new Error(`${engineConfig.providerLabel} returned no answer text.`);
+  }
   return buildLivePromptResult({
     response,
     outputText,
@@ -1412,6 +1419,7 @@ async function createOpenAiResponse(client, env, request) {
 }
 
 async function createOpenRouterChatCompletion(env, apiKey, request) {
+  const { useSearchTool = true, ...chatRequest } = request;
   const timeoutMs = parseIntegerEnv(
     env.OPENROUTER_PROMPT_TIMEOUT_MS,
     OPENROUTER_PROMPT_TIMEOUT_MS,
@@ -1421,8 +1429,10 @@ async function createOpenRouterChatCompletion(env, apiKey, request) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const body = {
-    ...request,
-    tools: [
+    ...chatRequest,
+  };
+  if (useSearchTool) {
+    body.tools = [
       {
         type: "openrouter:web_search",
         parameters: {
@@ -1431,8 +1441,8 @@ async function createOpenRouterChatCompletion(env, apiKey, request) {
           search_context_size: env.OPENROUTER_SEARCH_CONTEXT_SIZE || "medium",
         },
       },
-    ],
-  };
+    ];
+  }
 
   try {
     const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
