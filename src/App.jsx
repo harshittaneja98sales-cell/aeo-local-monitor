@@ -100,7 +100,7 @@ const defaultMonitorSummary = {
   citations: 0,
   competitors: 0,
 };
-const AUDIT_CLIENT_TIMEOUT_MS = 35000;
+const AUDIT_CLIENT_TIMEOUT_MS = 60000;
 const websiteBusinessTypeSignals = [
   {
     id: "pest-control",
@@ -529,21 +529,7 @@ function App() {
       sourceCompletion,
     ]
   );
-  const currentAuditInputKey = useMemo(
-    () =>
-      buildAuditInputKey({
-        profile,
-        selectedBusinessType,
-        competitors,
-        monitoredLocations,
-      }),
-    [profile, selectedBusinessType, competitors, monitoredLocations]
-  );
-  const serverAuditMatchesCurrentInput =
-    serverAuditReport?.auditInputKey === currentAuditInputKey;
-  const auditReport = serverAuditMatchesCurrentInput
-    ? serverAuditReport
-    : simulatedAuditReport;
+  const auditReport = serverAuditReport || simulatedAuditReport;
 
   useEffect(() => {
     function syncRoute() {
@@ -2583,7 +2569,7 @@ function getAuditModeNotice(mode) {
 
 function getAuditErrorMessage(error) {
   if (error?.name === "AbortError") {
-    return "Live audit timed out after 35 seconds.";
+    return "Live audit timed out after 60 seconds.";
   }
   return `Live audit endpoint failed: ${
     error instanceof Error ? error.message : "Unknown error"

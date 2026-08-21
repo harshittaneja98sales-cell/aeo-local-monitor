@@ -6,7 +6,7 @@ import {
   upsertBusinessFromAudit,
 } from "../server/database.js";
 
-const AUDIT_TIMEOUT_MS = 26000;
+const AUDIT_TIMEOUT_MS = 50000;
 const AUDIT_SAVE_TIMEOUT_MS = 6000;
 
 export default async function handler(req, res) {
@@ -47,6 +47,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       audit,
+      report: audit,
       mode: audit.mode,
       business,
       auditRun,
